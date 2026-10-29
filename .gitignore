@@ -1,0 +1,9 @@
+# Solo se sube la app. Lo de abajo es privado o de trabajo interno.
+.DS_Store
+.claude/
+CLAUDE.md
+*.pdf
+*.docx
+referencia-ruta-de-mar.webp
+carro-1001carros.png
+capturas/
