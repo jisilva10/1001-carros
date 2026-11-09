@@ -6,22 +6,63 @@ window.DATOS = {
   // Asesores ficticios. 'historial' son las acciones del mes (claves de CONFIG.acciones),
   // 'mesAnterior' son los puntos con que cerró el mes pasado (para la mayor mejora).
   asesores: [
-    { id: 'ana', nombre: 'Ana Ejemplo', agencia: 'Agencia Norte (prueba)', mesAnterior: 104,
+    { id: 'ana', horasAnio: 39, nombre: 'Ana Ejemplo', agencia: 'Agencia Norte (prueba)', mesAnterior: 104,
       historial: ['slaSemanal', 'seguimientoATiempo', 'seguimientoATiempo', 'ventaCerrada', 'caritaExcelente', 'cursoNota90', 'leadVencido', 'ventaCerrada', 'caritaBuena', 'cotizacionSinSeguimiento', 'ventaCerrada', 'caritaAceptable', 'ventaCerrada', 'leadVencido'] },
-    { id: 'bruno', nombre: 'Bruno Ejemplo', agencia: 'Agencia Sur (prueba)', mesAnterior: 128,
+    { id: 'bruno', horasAnio: 58, nombre: 'Bruno Ejemplo', agencia: 'Agencia Sur (prueba)', mesAnterior: 128,
       historial: ['slaSemanal', 'slaSemanal', 'slaSemanal', 'seguimientoATiempo', 'seguimientoATiempo', 'seguimientoATiempo', 'ventaCerrada', 'ventaCerrada', 'ventaCerrada', 'caritaExcelente', 'caritaExcelente', 'cursoNota80', 'leadVencido', 'ventaCerrada'] },
-    { id: 'carla', nombre: 'Carla Ejemplo', agencia: 'Agencia Centro (prueba)', mesAnterior: 125,
+    { id: 'carla', horasAnio: 71, nombre: 'Carla Ejemplo', agencia: 'Agencia Centro (prueba)', mesAnterior: 125,
       historial: ['slaSemanal', 'slaSemanal', 'seguimientoATiempo', 'seguimientoATiempo', 'ventaCerrada', 'ventaCerrada', 'caritaExcelente', 'caritaExcelente', 'caritaBuena', 'cursoNota90', 'cursoNota80', 'ventaCerrada'] },
-    { id: 'diego', nombre: 'Diego Ejemplo', agencia: 'Agencia Norte (prueba)', mesAnterior: 112,
+    { id: 'diego', horasAnio: 22, nombre: 'Diego Ejemplo', agencia: 'Agencia Norte (prueba)', mesAnterior: 112,
       historial: ['seguimientoATiempo', 'ventaCerrada', 'caritaBuena', 'leadVencido', 'leadVencido', 'cotizacionSinSeguimiento', 'cursoVencido', 'ventaCerrada'] },
-    { id: 'elena', nombre: 'Elena Ejemplo', agencia: 'Agencia Valle (prueba)', mesAnterior: 115,
+    { id: 'elena', horasAnio: 47, nombre: 'Elena Ejemplo', agencia: 'Agencia Valle (prueba)', mesAnterior: 115,
       historial: ['slaSemanal', 'seguimientoATiempo', 'seguimientoATiempo', 'ventaCerrada', 'ventaCerrada', 'caritaExcelente', 'cursoNota70', 'leadVencido', 'ventaCerrada'] },
-    { id: 'fernando', nombre: 'Fernando Ejemplo', agencia: 'Agencia Sur (prueba)', mesAnterior: 97,
+    { id: 'fernando', horasAnio: 18, nombre: 'Fernando Ejemplo', agencia: 'Agencia Sur (prueba)', mesAnterior: 97,
       historial: ['seguimientoATiempo', 'ventaCerrada', 'caritaAceptable', 'leadVencido', 'cotizacionSinSeguimiento', 'leadVencido'] },
-    { id: 'gabriela', nombre: 'Gabriela Ejemplo', agencia: 'Agencia Centro (prueba)', mesAnterior: 120,
+    { id: 'gabriela', horasAnio: 64, nombre: 'Gabriela Ejemplo', agencia: 'Agencia Centro (prueba)', mesAnterior: 120,
       historial: ['slaSemanal', 'slaSemanal', 'seguimientoATiempo', 'ventaCerrada', 'ventaCerrada', 'caritaBuena', 'caritaExcelente', 'cursoNota80', 'ventaCerrada'] },
-    { id: 'hugo', nombre: 'Hugo Ejemplo', agencia: 'Agencia Valle (prueba)', mesAnterior: 99,
+    { id: 'hugo', horasAnio: 12, nombre: 'Hugo Ejemplo', agencia: 'Agencia Valle (prueba)', mesAnterior: 99,
       historial: ['ventaCerrada', 'leadVencido', 'leadVencido', 'cotizacionSinSeguimiento', 'cursoVencido'] }
+  ],
+
+  // Horas de capacitación del año del asesor que entra (suman 39 h; la meta anual es 100).
+  horasPrevias: [
+    { fecha: '12/02', actividad: 'Inducción comercial', horas: 16, tipo: 'Inducción' },
+    { fecha: '20/03', actividad: 'Coaching con el jefe de agencia', horas: 1, tipo: 'Coaching' },
+    { fecha: '15/04', actividad: 'Coaching con el jefe de agencia', horas: 1, tipo: 'Coaching' },
+    { fecha: '22/05', actividad: 'Curso: Conexión con el cliente', horas: 4, tipo: 'Curso' },
+    { fecha: '10/06', actividad: 'Charla de producto', horas: 3, tipo: 'Charla' },
+    { fecha: '18/06', actividad: 'Coaching con el jefe de agencia', horas: 1, tipo: 'Coaching' },
+    { fecha: '14/08', actividad: 'Taller de financiamiento', horas: 4, tipo: 'Taller' },
+    { fecha: '19/09', actividad: 'Taller presencial de objeciones', horas: 8, tipo: 'Taller' },
+    { fecha: '14/10', actividad: 'Coaching con el jefe de agencia', horas: 1, tipo: 'Coaching' }
+  ],
+
+  // Antes y después: números mensuales del asesor (inventados pero coherentes) y cuándo se capacitó.
+  // 'mes' es la posición en 'meses'. Antes = promedio de los 2 meses previos; después = de los 2 siguientes.
+  impacto: {
+    meses: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct'],
+    indicadores: {
+      conversion: { nombre: 'Conversión', unidad: '%', valores: [10.5, 10.8, 11.0, 10.9, 11.2, 12.0, 12.3, 11.8, 12.2, 14.3] },
+      ventas: { nombre: 'Ventas al mes', unidad: '', valores: [3, 4, 3, 4, 4, 5, 5, 4, 5, 6] },
+      satisfaccion: { nombre: 'Clientes satisfechos', unidad: '%', valores: [80, 81, 80, 82, 83, 86, 87, 86, 87, 90] }
+    },
+    capacitaciones: [
+      { mes: 4, nombre: 'Conexión con el cliente', horas: 4 },
+      { mes: 8, nombre: 'Taller de objeciones', horas: 8 }
+    ]
+  },
+
+  // Capa de juego: cómo arranca el asesor que entra.
+  juego: { racha: 4, retoAvance: 3, preguntasCorrectas: 3 },
+
+  // Pregunta del día: una por día, sale de lo que enseñan los cursos.
+  preguntasDelDia: [
+    { texto: '¿Cuántos puntos tiene la revisión que se le hace a cada auto?', opciones: ['50', '150', '300'], correcta: 1, explicacion: 'Cada auto pasa una revisión de 150 puntos antes de salir a la venta.' },
+    { texto: 'El cliente dice que en Marketplace está $900 más barato. ¿Qué haces primero?', opciones: ['Bajo el precio', 'Comparo lo que incluye cada opción', 'Le digo que compre allá'], correcta: 1, explicacion: 'La diferencia es el respaldo: revisión, garantía, devolución y trámites.' },
+    { texto: '¿Cuánto dura la garantía de satisfacción?', opciones: ['7 días o 300 km', '30 días', '1 año'], correcta: 0, explicacion: 'Si no le convence, tiene 7 días o 300 km.' },
+    { texto: '«¿Para cuándo me lo entregan?» es…', opciones: ['Una objeción', 'Una señal de compra', 'Una queja'], correcta: 1, explicacion: 'Es una señal de compra: es momento de proponer el cierre.' },
+    { texto: '¿Qué cubre la garantía mecánica?', opciones: ['6 meses', '1 año o 20.000 km', '2 años sin límite'], correcta: 1, explicacion: 'La garantía mecánica es de 1 año o 20.000 km.' },
+    { texto: '¿Cuándo conviene preguntar por la forma de pago?', opciones: ['Al final', 'Desde el primer contacto', 'Solo si el cliente pregunta'], correcta: 1, explicacion: 'Saber pronto cómo piensa pagar ayuda a ofrecer el financiamiento a tiempo.' }
   ],
 
   // Semana del asesor que entra: leads atendidos dentro del tiempo / total (para el +4 semanal).
@@ -145,7 +186,7 @@ window.DATOS = {
   // Ruta de capacitación: 4 cursos con contenido breve y evaluación corta.
   cursos: [
     {
-      id: 'c1', nombre: 'Conexión con el cliente', duracion: '15 min', vence: 'Completado', estado: 'completado', notaInicial: 60, notaFinal: 92,
+      id: 'c1', horas: 4, nombre: 'Conexión con el cliente', duracion: '15 min', vence: 'Completado', estado: 'completado', notaInicial: 60, notaFinal: 92,
       contenido: [
         ['Escucha activa', 'Deje hablar al cliente sin interrumpir y repita con sus palabras lo que entendió.'],
         ['Sintonía', 'Adapte el ritmo y el tono a la persona: no se le habla igual a una familia que a un comprador de flota.'],
@@ -158,7 +199,7 @@ window.DATOS = {
       ]
     },
     {
-      id: 'c2', nombre: 'Manejo de objeciones', duracion: '20 min', vence: 'Vence en 3 días', estado: 'en curso', notaInicial: 55,
+      id: 'c2', horas: 6, nombre: 'Manejo de objeciones', duracion: '20 min', vence: 'Vence en 3 días', estado: 'en curso', notaInicial: 55,
       contenido: [
         ['Precio', 'No baje el precio de entrada: muestre lo que incluye (revisión de 150 puntos, garantías y trámites).'],
         ['Marketplace', 'Un particular no da revisión, ni garantía, ni devolución. Esa diferencia es el respaldo.'],
@@ -173,7 +214,7 @@ window.DATOS = {
       ]
     },
     {
-      id: 'c3', nombre: 'Propuesta de valor de 1001Carros', duracion: '15 min', vence: 'Vence el 15/11', estado: 'pendiente',
+      id: 'c3', horas: 4, nombre: 'Propuesta de valor de 1001Carros', duracion: '15 min', vence: 'Vence el 15/11', estado: 'pendiente',
       contenido: [
         ['Revisión de 150 puntos', 'Cada auto pasa una revisión completa antes de salir a la venta.'],
         ['Garantías', 'Mecánica de 1 año o 20.000 km, de satisfacción de 7 días o 300 km y de procedencia.'],
@@ -186,7 +227,7 @@ window.DATOS = {
       ]
     },
     {
-      id: 'c4', nombre: 'Negociación y cierre', duracion: '20 min', vence: 'Vence el 30/11', estado: 'pendiente',
+      id: 'c4', horas: 6, nombre: 'Negociación y cierre', duracion: '20 min', vence: 'Vence el 30/11', estado: 'pendiente',
       contenido: [
         ['Señales de compra', 'Preguntas por la entrega, el color o la cuota: es momento de proponer el cierre.'],
         ['Técnicas de cierre', 'Resuma lo acordado y proponga el siguiente paso concreto.'],

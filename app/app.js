@@ -5,7 +5,7 @@
 */
 (function () {
   const C = window.CONFIG, D = window.DATOS;
-  const CLAVE = 'app-asesor-1001-v2';
+  const CLAVE = 'app-asesor-1001-v3';
   const SLA = C.leads.minutosMaximoRespuesta;
 
   // ---------- Estado guardado ----------
@@ -37,7 +37,12 @@
       cursos: D.cursos.map(c => ({ id: c.id, estado: c.estado, notaInicial: c.notaInicial || null, notaFinal: c.notaFinal || null })),
       objeciones: copia(D.objecionesPrevias),
       coaching: copia(D.coaching),
-      kit: []
+      kit: [],
+      horas: copia(D.horasPrevias),
+      racha: { dias: D.juego.racha, hoy: null },
+      reto: { avance: D.juego.retoAvance, cumplido: false },
+      pregunta: { correctas: D.juego.preguntasCorrectas, fecha: null, elegida: null },
+      insignias: null
     };
   }
 
@@ -45,7 +50,9 @@
   const yo = () => s.porUsuario[s.usuario];
 
   // ---------- Puntos ----------
-  const puntosDe = hist => C.puntosInicioMes + hist.reduce((t, h) => t + C.acciones[h.accion].puntos, 0);
+  // Una entrada puede traer sus propios puntos (las horas de capacitación suman por hora).
+  const valor = h => (h.puntos != null ? h.puntos : C.acciones[h.accion].puntos);
+  const puntosDe = hist => C.puntosInicioMes + hist.reduce((t, h) => t + valor(h), 0);
   const ventasDe = hist => hist.filter(h => h.accion === 'ventaCerrada').length;
   function historialDe(id) { return s.porUsuario[id] ? s.porUsuario[id].historial : historialSembrado(asesor(id).historial); }
 
@@ -58,14 +65,67 @@
   const posicion = id => tabla().findIndex(f => f.a.id === id) + 1;
 
   // Registra una o varias acciones con puntos y avisa cuánto sumó o restó.
-  function sumar(claves, detalle, texto) {
-    claves = [].concat(claves);
+  // Cada elemento es una clave de CONFIG.acciones o { accion, puntos, detalle }.
+  function sumar(items, detalle, texto) {
+    items = [].concat(items).map(x => (typeof x === 'string' ? { accion: x } : x));
     const e = yo();
     let total = 0;
-    claves.forEach(k => { e.historial.push({ accion: k, t: Date.now(), detalle: detalle || '' }); total += C.acciones[k].puntos; });
+    items.forEach(x => { const h = Object.assign({ t: Date.now(), detalle: detalle || '' }, x); e.historial.push(h); total += valor(h); });
     guardar();
-    const motivo = claves.length === 1 ? C.acciones[claves[0]].motivo : claves.map(k => C.acciones[k].motivo.split(' ')[0]).join(' + ');
+    const motivo = items.length === 1 ? C.acciones[items[0].accion].motivo : items.map(x => C.acciones[x.accion].motivo.split(' ')[0]).join(' + ');
     avisar(`${total > 0 ? '+' : '−'}${Math.abs(total)} puntos · ${texto || motivo}`, total > 0 ? 'mas' : 'menos');
+  }
+
+  // ---------- Horas de capacitación ----------
+  const dos = n => String(n).padStart(2, '0');
+  const hoyCorto = () => { const d = new Date(); return `${dos(d.getDate())}/${dos(d.getMonth() + 1)}`; };
+  const horasDe = id => (s.porUsuario[id] ? s.porUsuario[id].horas.reduce((t, h) => t + h.horas, 0) : asesor(id).horasAnio);
+  const mesCorto = () => dos(new Date().getMonth() + 1);
+  const horasDelMes = () => yo().horas.filter(h => h.fecha.slice(3) === mesCorto()).reduce((t, h) => t + h.horas, 0);
+  // Ritmo esperado: la parte de la meta anual que correspondería a la fecha de hoy.
+  function horasEsperadas() {
+    const d = new Date(), inicio = new Date(d.getFullYear(), 0, 1);
+    return Math.round(C.capacitacion.metaHorasAnio * (d - inicio) / (365 * 864e5));
+  }
+  // Anota las horas y devuelve la entrada de puntos que les corresponde.
+  function horasItem(horas, actividad, tipo) {
+    yo().horas.push({ fecha: hoyCorto(), actividad, horas, tipo });
+    return { accion: 'horasCapacitacion', puntos: horas * C.acciones.horasCapacitacion.puntos, detalle: `${actividad} · ${horas} h` };
+  }
+
+  // ---------- Capa de juego ----------
+  function sumarRacha() {
+    const r = yo().racha, hoy = hoyCorto();
+    if (r.hoy !== hoy) { r.dias++; r.hoy = hoy; }
+  }
+  function preguntaHoy() {
+    const d = new Date(), n = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
+    return D.preguntasDelDia[n % D.preguntasDelDia.length];
+  }
+  function medidas() {
+    const e = yo();
+    return {
+      leadsATiempo: e.semana.dentroDelTiempo,
+      racha: e.racha.dias,
+      caritasExcelentes: e.historial.filter(h => h.accion === 'caritaExcelente').length,
+      objecionesResueltas: e.objeciones.filter(o => o.resuelta).length,
+      horas: horasDe(s.usuario),
+      preguntasCorrectas: e.pregunta.correctas,
+      cursos: e.cursos.filter(c => c.estado === 'completado').length,
+      podio: posicion(s.usuario) <= 3 ? 1 : 0
+    };
+  }
+  // Desbloquea las insignias que ya se cumplen. La primera vez es en silencio (lo que ya traía).
+  function revisarInsignias() {
+    const e = yo(), m = medidas(), primera = !e.insignias;
+    if (primera) e.insignias = [];
+    C.insignias.forEach(i => {
+      if (m[i.medida] >= i.meta && !e.insignias.includes(i.id)) {
+        e.insignias.push(i.id);
+        if (!primera) avisar(`Insignia desbloqueada: ${i.nombre}`, 'logro');
+      }
+    });
+    guardar();
   }
 
   // ---------- Leads ----------
@@ -97,7 +157,7 @@
     const w = yo().semana;
     l.atendido = true;
     l.proximaAccion = 'Programar el siguiente seguimiento';
-    if (!l.vencido) { w.dentroDelTiempo++; w.total++; }
+    if (!l.vencido) { w.dentroDelTiempo++; w.total++; sumarRacha(); }
     guardar();
     if (!w.bonoEntregado && w.dentroDelTiempo / w.total * 100 >= C.leads.porcentajeSemanal) {
       w.bonoEntregado = true; guardar();
@@ -114,6 +174,7 @@
     yo().leads.forEach(l => {
       if (!l.atendido && !l.vencido && minutos(l) >= SLA) {
         l.vencido = true; yo().semana.total++; cambio = true;
+        yo().racha.dias = 0; yo().racha.hoy = hoyCorto();
         sumar('leadVencido', l.nombre);
       }
       const el = document.querySelectorAll(`[data-reloj="${l.id}"]`);
@@ -241,6 +302,7 @@
         </div>
         <h2 class="titulo-seccion">Lo que requiere atención hoy</h2>
         <div class="tarjeta">${alertas || '<p class="muted">Todo al día. Buen trabajo.</p>'}</div>
+        ${juegoHTML()}
         <h2 class="titulo-seccion">Módulos</h2>
         <div class="modulos">
           <a class="modulo" href="#leads"><span class="modulo-num">Módulo 1</span><span class="modulo-nombre">Gestión de leads</span><span class="modulo-dato">${urgentes.length} urgente${urgentes.length === 1 ? '' : 's'} · ${pctSemana()} % a tiempo</span></a>
@@ -249,6 +311,39 @@
           <a class="modulo" href="#ranking"><span class="modulo-num">Módulo 4</span><span class="modulo-nombre">Incentivos y motivación</span><span class="modulo-dato">Puesto ${pos} · ver premios</span></a>
         </div>`,
       despues: moverCarro
+    };
+  }
+
+  const MEDALLA = '<svg viewBox="0 0 24 24"><path d="M8 14.5L6 22l6-3 6 3-2-7.5" fill="currentColor" opacity=".55"/><circle cx="12" cy="9.5" r="7" fill="currentColor"/><path d="M12 5.8l1.2 2.5 2.7.4-2 1.9.5 2.7L12 12l-2.4 1.3.5-2.7-2-1.9 2.7-.4z" fill="#fff"/></svg>';
+  function juegoHTML() {
+    const e = yo(), r = e.reto, q = preguntaHoy(), respondida = e.pregunta.fecha === hoyCorto();
+    const puntos = Array.from({ length: 7 }, (_, i) => `<span class="${i < Math.min(e.racha.dias, 7) ? 'on' : ''}"></span>`).join('');
+    const pregunta = respondida
+      ? `${q.opciones.map((o, i) => `<div class="opcion-dia ${i === q.correcta ? 'correcta' : i === e.pregunta.elegida ? 'incorrecta' : ''}">${esc(o)}</div>`).join('')}
+         <p class="muted pequeno" style="margin-top:8px">${e.pregunta.elegida === q.correcta ? `Correcto, +${C.acciones.preguntaDelDia.puntos} punto.` : 'Esta vez no.'} ${esc(q.explicacion)} Mañana hay otra.</p>`
+      : q.opciones.map((o, i) => `<button class="opcion-dia" data-accion="pregunta" data-op="${i}">${esc(o)}</button>`).join('');
+    return `<h2 class="titulo-seccion">Tu juego de la semana <a href="#logros">Ver logros</a></h2>
+      <div class="juego">
+        <div class="tarjeta"><span class="juego-label">Racha</span><span class="juego-cifra">${e.racha.dias} día${e.racha.dias === 1 ? '' : 's'}</span><span class="muted pequeno">seguidos con todo a tiempo</span><div class="racha">${puntos}</div></div>
+        <a class="tarjeta" href="#logros"><span class="juego-label">Insignias</span><span class="juego-cifra">${e.insignias.length} de ${C.insignias.length}</span><span class="muted pequeno">desbloqueadas</span><div class="medallas">${C.insignias.slice(0, 5).map(i => `<span class="${e.insignias.includes(i.id) ? 'on' : ''}">${MEDALLA}</span>`).join('')}</div></a>
+      </div>
+      <div class="tarjeta reto"><div class="meta-ventas-fila"><span><span class="juego-label">Reto de la semana</span><br><strong>${esc(C.reto.texto)}</strong></span><span class="chip ${r.cumplido ? 'aldia' : 'morado'}">${r.cumplido ? 'Cumplido' : `+${C.acciones.retoSemanal.puntos} pts`}</span></div>
+        <div class="barra-progreso amarilla"><span style="width:${Math.min(100, r.avance / C.reto.meta * 100)}%"></span></div><div class="muted pequeno" style="margin-top:4px">${Math.min(r.avance, C.reto.meta)} de ${C.reto.meta}</div></div>
+      <div class="tarjeta pregunta-dia"><div class="meta-ventas-fila"><span class="juego-label">Pregunta del día</span><span class="muted pequeno">+${C.acciones.preguntaDelDia.puntos} punto · 10 segundos</span></div>
+        <strong>${esc(q.texto)}</strong><div class="opciones-dia">${pregunta}</div></div>`;
+  }
+
+  function pLogros() {
+    const e = yo(), m = medidas();
+    return {
+      barra: { titulo: 'Mis logros', sub: `${e.insignias.length} de ${C.insignias.length} insignias`, volver: '#progreso' },
+      pestana: 'progreso',
+      html: `<div class="insignias">${C.insignias.map(i => {
+          const ok = e.insignias.includes(i.id), avance = Math.min(m[i.medida], i.meta);
+          return `<div class="insignia ${ok ? 'on' : ''}"><div class="insignia-icono">${MEDALLA}</div><strong>${esc(i.nombre)}</strong><span class="muted pequeno">${esc(i.descripcion)}</span>
+            ${ok ? '<span class="chip aldia">Desbloqueada</span>' : `<div class="barra-progreso" style="width:100%"><span style="width:${avance / i.meta * 100}%"></span></div><span class="muted pequeno">${avance} de ${i.meta}</span>`}</div>`;
+        }).join('')}</div>
+        <p class="nota">Las insignias se desbloquean solas con lo que registras. No dan puntos: son reconocimiento.</p>`
     };
   }
 
@@ -396,24 +491,80 @@
     return {
       barra: { titulo: 'Mi desarrollo', sub: 'Ruta de capacitación y coaching' },
       pestana: 'desarrollo',
-      html: `<div class="tarjeta" style="margin-top:14px"><div class="meta-ventas-fila"><span>Progreso de aprendizaje</span><strong>${hechos} de ${D.cursos.length} cursos</strong></div><div class="barra-progreso"><span style="width:${hechos / D.cursos.length * 100}%"></span></div></div>
+      html: `${horasHTML()}
+        <div class="tarjeta"><div class="meta-ventas-fila"><span>Progreso de aprendizaje</span><strong>${hechos} de ${D.cursos.length} cursos</strong></div><div class="barra-progreso"><span style="width:${hechos / D.cursos.length * 100}%"></span></div></div>
         ${rec ? `<a class="tarjeta recomendado" href="#curso/${rec.curso.id}" style="display:block"><small>Recomendado para ti</small><strong>${esc(rec.curso.nombre)}</strong><div class="muted pequeno">${esc(rec.motivo)}</div></a>` : ''}
         <h2 class="titulo-seccion">Ruta de capacitación</h2>
         <div class="tarjeta">${D.cursos.map((c, i) => {
           const ec = estadoCurso(c.id), cls = ec.estado === 'completado' ? 'completado' : ec.estado === 'en curso' ? 'encurso' : '';
-          const sub = ec.estado === 'completado' ? `Nota ${ec.notaFinal} %${ec.notaInicial ? ` (antes ${ec.notaInicial} %)` : ''}` : `${c.duracion} · ${c.vence}`;
+          const sub = ec.estado === 'completado' ? `Nota ${ec.notaFinal} %${ec.notaInicial ? ` (antes ${ec.notaInicial} %)` : ''} · ${c.horas} h` : `${c.horas} h · ${c.vence}`;
           return `<a class="curso" href="#curso/${c.id}"><div class="curso-num ${cls}">${ec.estado === 'completado' ? '✓' : i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(c.nombre)}</div><div class="fila-sub">${sub}</div></div><span class="chip ${ec.estado === 'completado' ? 'morado' : ec.estado === 'en curso' ? 'pendiente' : 'gris'}">${ec.estado === 'completado' ? 'Completado' : ec.estado === 'en curso' ? 'En curso' : 'Pendiente'}</span></a>`;
         }).join('')}</div>
-        <p class="nota">Nota de 90 a 100 %: +7 · de 80 a 89 %: +5 · de 70 a 79 %: +3 · vencido sin completar: −2.</p>
+        <p class="nota">Nota de 90 a 100 %: +7 · de 80 a 89 %: +5 · de 70 a 79 %: +3 · vencido sin completar: −2. Además, +${C.acciones.horasCapacitacion.puntos} por cada hora.</p>
+        ${impactoHTML()}
         <h2 class="titulo-seccion">Coaching con el jefe de agencia</h2>
         <div class="tarjeta">${e.coaching.map(c => `<div class="mov"><div><strong>${esc(c.brecha)}</strong><small>${esc(c.fecha)} · ${esc(c.jefe)}</small><small style="color:var(--texto)">Acción acordada: ${esc(c.accion)}</small></div></div>`).join('')}</div>
         <form class="tarjeta" id="form-coaching">
           <strong>Registrar sesión de coaching</strong>
           <label class="campo" style="margin-top:10px"><span>Brecha detectada</span><select name="brecha" required><option value="">Elegir…</option>${['Tiempo de respuesta a leads', 'Seguimiento de cotizaciones', 'Objeciones de precio', 'Objeciones de Marketplace', 'Financiamiento', 'Cierre de la venta'].map(b => `<option>${b}</option>`).join('')}</select></label>
           <label class="campo"><span>Acción de mejora acordada</span><textarea name="accion" required placeholder="Ej.: practicar la guía de precio en un role play"></textarea></label>
+          <label class="campo"><span>Duración</span><select name="horas">${[0.5, 1, 1.5, 2].map(h => `<option value="${h}" ${h === 1 ? 'selected' : ''}>${String(h).replace('.', ',')} h</option>`).join('')}</select></label>
           <button class="boton secundario" type="submit">Guardar sesión</button>
-        </form>`
+        </form>
+        <h2 class="titulo-seccion">Registro de horas de ${new Date().getFullYear()}</h2>
+        <div class="tarjeta">${e.horas.slice().reverse().map(h => `<div class="mov"><div>${esc(h.actividad)}<small>${esc(h.fecha)} · ${esc(h.tipo)}</small></div><span class="mov-puntos">${String(h.horas).replace('.', ',')} h</span></div>`).join('')}</div>`
     };
+  }
+
+  function dona(valor, meta) {
+    const pct = Math.min(100, valor / meta * 100);
+    return `<svg viewBox="0 0 36 36" class="dona" role="img" aria-label="${Math.round(pct)} % de la meta"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--morado-suave)" stroke-width="3.4"/><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--morado)" stroke-width="3.4" stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="25" stroke-linecap="round"/><text x="18" y="18.2" text-anchor="middle" class="dona-cifra">${Math.round(pct)}%</text><text x="18" y="23.2" text-anchor="middle" class="dona-label">de la meta</text></svg>`;
+  }
+  function horasHTML() {
+    const h = horasDe(s.usuario), meta = C.capacitacion.metaHorasAnio, esperado = horasEsperadas();
+    const diferencia = h - esperado;
+    return `<div class="tarjeta horas" style="margin-top:14px">${dona(h, meta)}
+      <div class="horas-cuerpo"><span class="juego-label">Horas de capacitación ${new Date().getFullYear()}</span>
+        <span class="horas-cifra">${String(h).replace('.', ',')} <small>de ${meta} h</small></span>
+        <span class="pequeno">Ritmo esperado a hoy: ${esperado} h · <strong style="color:${diferencia < 0 ? 'var(--rojo)' : 'var(--verde)'}">${diferencia < 0 ? `vas ${Math.abs(diferencia)} h atrás` : 'vas al día'}</strong></span>
+        <span class="muted pequeno">Este mes: ${String(horasDelMes()).replace('.', ',')} h · +${C.acciones.horasCapacitacion.puntos} punto por hora</span></div></div>`;
+  }
+
+  // Antes y después de cada capacitación, con los números mensuales del asesor.
+  let indicador = 'conversion';
+  const prom = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  const num = (n, u) => n == null ? '—' : n.toLocaleString('es-EC', { maximumFractionDigits: 1 }) + (u ? ' ' + u : '');
+  function antesDespues(ind, mes) {
+    const v = D.impacto.indicadores[ind].valores;
+    return [prom(v.slice(Math.max(0, mes - 2), mes)), prom(v.slice(mes + 1, mes + 3))];
+  }
+  function grafico() {
+    const I = D.impacto, ind = I.indicadores[indicador], v = ind.valores;
+    const W = 320, H = 150, izq = 30, der = 10, arr = 18, aba = 22;
+    const min = Math.min(...v), max = Math.max(...v), r = (max - min) || 1, lo = min - r * 0.2, hi = max + r * 0.2;
+    const x = i => izq + (W - izq - der) * i / (v.length - 1), y = n => arr + (H - arr - aba) * (1 - (n - lo) / (hi - lo));
+    const marcas = I.capacitaciones.map((c, k) => `<line x1="${x(c.mes)}" x2="${x(c.mes)}" y1="${arr - 4}" y2="${H - aba}" class="g-marca"/><circle cx="${x(c.mes)}" cy="${arr - 8}" r="7" class="g-marca-punto"/><text x="${x(c.mes)}" y="${arr - 5}" text-anchor="middle" class="g-marca-num">${k + 1}</text>`).join('');
+    const linea = v.map((n, i) => `${i ? 'L' : 'M'}${x(i)},${y(n)}`).join(' ');
+    return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="${esc(ind.nombre)} por mes">
+      <line x1="${izq}" x2="${W - der}" y1="${H - aba}" y2="${H - aba}" class="g-eje"/>
+      <text x="${izq - 6}" y="${y(max) + 3}" text-anchor="end" class="g-texto">${num(max)}</text><text x="${izq - 6}" y="${y(min) + 3}" text-anchor="end" class="g-texto">${num(min)}</text>
+      ${marcas}<path d="${linea}" class="g-linea"/>${v.map((n, i) => `<circle cx="${x(i)}" cy="${y(n)}" r="2.6" class="g-punto"/>`).join('')}
+      ${I.meses.map((m, i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" class="g-texto">${m}</text>`).join('')}
+    </svg>`;
+  }
+  function impactoHTML() {
+    const I = D.impacto;
+    return `<h2 class="titulo-seccion">Antes y después de capacitarte</h2>
+      <div class="tarjeta">
+        <div class="segmentos">${Object.entries(I.indicadores).map(([k, ind]) => `<button data-indicador="${k}" class="${k === indicador ? 'activo' : ''}">${esc(ind.nombre)}</button>`).join('')}</div>
+        ${grafico()}
+        <p class="muted pequeno">Cada número marca el mes de una capacitación. Antes: promedio de los 2 meses previos. Después: de los 2 siguientes.</p>
+      </div>
+      ${I.capacitaciones.map((c, k) => `<div class="tarjeta impacto"><div class="meta-ventas-fila"><span><span class="g-num">${k + 1}</span><strong>${esc(c.nombre)}</strong></span><span class="muted pequeno">${I.meses[c.mes]} · ${c.horas} h</span></div>
+        <table class="tabla"><thead><tr><th></th><th>Antes</th><th>Después</th></tr></thead><tbody>${Object.entries(I.indicadores).map(([kk, ind]) => {
+          const [a, d] = antesDespues(kk, c.mes), dif = d - a;
+          return `<tr><td>${esc(ind.nombre)}</td><td>${num(a, ind.unidad)}</td><td>${num(d, ind.unidad)} <span class="${dif >= 0 ? 'sube' : 'baja'}">${dif >= 0 ? '▲' : '▼'} ${num(Math.abs(dif))}</span></td></tr>`;
+        }).join('')}</tbody></table></div>`).join('')}`;
   }
 
   function preguntasHTML(c, revisar) {
@@ -426,7 +577,7 @@
   let ultimoResultado = null;
   function pCurso(id, paso) {
     const c = curso(id); if (!c) return pNoExiste();
-    const ec = estadoCurso(id), base = { barra: { titulo: c.nombre, sub: `Curso · ${c.duracion}`, volver: '#desarrollo' }, pestana: 'desarrollo' };
+    const ec = estadoCurso(id), base = { barra: { titulo: c.nombre, sub: `Curso · ${c.horas} h de capacitación`, volver: '#desarrollo' }, pestana: 'desarrollo' };
     if (paso === 'inicial' || paso === 'evaluacion') {
       const inicial = paso === 'inicial';
       return Object.assign(base, {
@@ -439,7 +590,7 @@
       return Object.assign(base, {
         html: `<div class="tarjeta resultado" style="margin-top:14px">
             <div class="muted pequeno">Tu nota</div><div class="resultado-nota">${r.nota} %</div>
-            <div style="margin-top:4px">${r.accion ? `<span class="chip aldia">${signo(C.acciones[r.accion].puntos)} puntos · ${esc(C.acciones[r.accion].motivo)}</span>` : '<span class="chip urgente">No aprobado: puedes repetirla</span>'}</div>
+            <div style="margin-top:4px">${r.accion ? `<span class="chip aldia">${signo(C.acciones[r.accion].puntos)} puntos · ${esc(C.acciones[r.accion].motivo)}</span><br><span class="chip morado" style="margin-top:6px">${c.horas} h de capacitación · ${signo(c.horas * C.acciones.horasCapacitacion.puntos)} puntos</span>` : '<span class="chip urgente">No aprobado: puedes repetirla</span>'}</div>
             <div class="antes-despues"><div><span class="muted pequeno">Antes</span><strong>${ec.notaInicial} %</strong></div><div><span class="muted pequeno">Después</span><strong>${r.nota} %</strong></div></div>
           </div>
           <h2 class="titulo-seccion">Tus respuestas</h2>
@@ -460,7 +611,7 @@
 
   function componentes(hist) {
     const r = {}; Object.keys(C.componentes).forEach(k => { r[k] = 0; });
-    hist.forEach(h => { r[C.acciones[h.accion].componente] += C.acciones[h.accion].puntos; });
+    hist.forEach(h => { r[C.acciones[h.accion].componente] += valor(h); });
     return r;
   }
 
@@ -479,12 +630,13 @@
           ${pistaHTML(p, true)}
           <p class="muted pequeno" style="text-align:center">${faltan > 0 ? `Te faltan ${faltan} puntos para la meta del carro.` : 'Llegaste a la meta del carro este mes.'} Empezaste el mes con ${C.puntosInicioMes}.</p>
         </div>
+        <a class="tarjeta fila-enlace" href="#logros"><span><strong>Mis logros</strong><span class="muted pequeno"> · ${yo().insignias.length} de ${C.insignias.length} insignias · racha de ${yo().racha.dias} días</span></span><span class="flecha">›</span></a>
         <h2 class="titulo-seccion">De dónde vienen tus puntos</h2>
         <div class="componentes">${Object.entries(C.componentes).map(([k, n]) => `<div class="componente"><strong style="color:${comp[k] < 0 ? 'var(--rojo)' : 'var(--morado)'}">${signo(comp[k]).replace('−0', '0').replace('+0', '0')}</strong><span>${n}</span></div>`).join('')}</div>
         <h2 class="titulo-seccion">Mis puntos: historial</h2>
         <div class="tarjeta">${e.historial.slice().reverse().map(h => {
-          const a = C.acciones[h.accion];
-          return `<div class="mov"><div>${esc(a.motivo)}<small>${fecha(h.t)}${h.detalle ? ' · ' + esc(h.detalle) : ''}</small></div><span class="mov-puntos ${a.puntos > 0 ? 'mas' : 'menos'}">${signo(a.puntos)}</span></div>`;
+          const a = C.acciones[h.accion], v = valor(h);
+          return `<div class="mov"><div>${esc(a.motivo)}<small>${fecha(h.t)}${h.detalle ? ' · ' + esc(h.detalle) : ''}</small></div><span class="mov-puntos ${v > 0 ? 'mas' : 'menos'}">${signo(v)}</span></div>`;
         }).join('')}
         <div class="mov"><div>Inicio del mes<small>${fecha(inicioMes)}</small></div><span class="mov-puntos">${C.puntosInicioMes}</span></div></div>
         <button class="boton-texto" data-accion="salir">Cerrar sesión</button>`,
@@ -515,6 +667,9 @@
         <h2 class="titulo-seccion">Ranking completo</h2>
         <div class="tarjeta">${t.map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><div class="posicion">${i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(f.a.nombre)}${f.a.id === s.usuario ? ' <span class="chip morado">Tú</span>' : ''}</div><div class="fila-sub">${esc(f.a.agencia)} · ${f.ventas} ventas</div></div><span class="puntos-fila">${f.puntos}</span></div>`).join('')}</div>
         <p class="nota">El ranking suma resultados, gestión, servicio y desarrollo; no solo ventas.</p>
+        <h2 class="titulo-seccion">Horas de capacitación del año</h2>
+        <div class="tarjeta">${D.asesores.map(a => ({ a, h: horasDe(a.id) })).sort((x, y) => y.h - x.h).map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><div class="posicion">${i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(f.a.nombre)}</div><div class="barra-progreso" style="margin-top:5px"><span style="width:${Math.min(100, f.h / C.capacitacion.metaHorasAnio * 100)}%"></span></div></div><span class="puntos-fila">${String(f.h).replace('.', ',')}<small class="muted pequeno"> h</small></span></div>`).join('')}</div>
+        <p class="nota">Meta: ${C.capacitacion.metaHorasAnio} horas de capacitación comercial por asesor al año (Balanced Scorecard).</p>
         <h2 class="titulo-seccion">Premios</h2>
         <div class="tarjeta">${C.premios.map((p, i) => `<div class="premio"><div class="fila-cuerpo"><div class="premio-puesto">${esc(p.puesto)}</div><div>${esc(p.premio)}</div><div class="fila-sub">${esc(p.frecuencia)}</div></div>${estadoPremio(i)}</div>`).join('')}</div>
         <p class="nota">Montos provisionales: se definen después del análisis financiero.</p>`
@@ -528,10 +683,11 @@
     const [r, a, b] = ruta();
     if (!s.usuario || !yo()) { if (r !== 'login') { location.replace('#login'); return; } }
     else if (r === 'login') { location.replace('#inicio'); return; }
+    if (s.usuario && yo()) revisarInsignias();
     const p = ({
       login: pLogin, inicio: pInicio, leads: pLeads, lead: () => pLead(a), acciones: () => pAcciones(a),
       objecion: () => pObjecion(a), guia: () => pGuia(a, b), cierre: () => pCierre(a), desarrollo: pDesarrollo,
-      curso: () => pCurso(a, b), progreso: pProgreso, ranking: pRanking
+      curso: () => pCurso(a, b), progreso: pProgreso, ranking: pRanking, logros: pLogros
     }[r] || pNoExiste)();
     const barra = $('#barra');
     barra.hidden = !!p.sinBarra;
@@ -554,13 +710,17 @@
     render();
   });
 
-  let temporizador;
-  function avisar(texto, tipo) {
-    const a = $('#aviso');
-    a.textContent = texto;
-    a.className = 'aviso ver ' + (tipo || '');
-    clearTimeout(temporizador);
-    temporizador = setTimeout(() => { a.className = 'aviso ' + (tipo || ''); }, 3000);
+  // Los avisos salen uno detrás de otro, para que un logro no tape a los puntos.
+  const cola = [];
+  let mostrando = false;
+  function avisar(texto, tipo) { cola.push([texto, tipo || '']); if (!mostrando) siguienteAviso(); }
+  function siguienteAviso() {
+    const a = $('#aviso'), sig = cola.shift();
+    if (!sig) { mostrando = false; return; }
+    mostrando = true;
+    a.textContent = sig[0];
+    a.className = 'aviso ver ' + sig[1];
+    setTimeout(() => { a.className = 'aviso ' + sig[1]; setTimeout(siguienteAviso, 300); }, 2600);
   }
 
   // ---------- Eventos ----------
@@ -585,6 +745,8 @@
     if (k) { cierre.kit = k.dataset.kit; render(); return; }
     const c = e.target.closest('[data-carita]');
     if (c) { cierre.carita = c.dataset.carita; render(); return; }
+    const ind = e.target.closest('[data-indicador]');
+    if (ind) { indicador = ind.dataset.indicador; render(); return; }
 
     const b = e.target.closest('[data-accion]');
     if (!b) return;
@@ -596,7 +758,18 @@
         l.seguimientoHecho = true;
         l.proximaAccion = 'Programar el siguiente seguimiento';
         guardar();
-        sumar('seguimientoATiempo', l.nombre); render(); break;
+        sumar('seguimientoATiempo', l.nombre);
+        const reto = yo().reto;
+        reto.avance++;
+        if (!reto.cumplido && reto.avance >= C.reto.meta) { reto.cumplido = true; guardar(); sumar('retoSemanal', C.reto.texto); }
+        guardar(); render(); break;
+      case 'pregunta': {
+        const e2 = yo(), q = preguntaHoy(), op = Number(b.dataset.op);
+        e2.pregunta.fecha = hoyCorto(); e2.pregunta.elegida = op;
+        if (op === q.correcta) { e2.pregunta.correctas++; guardar(); sumar('preguntaDelDia', 'Pregunta del día', 'Pregunta del día: respuesta correcta'); }
+        else { guardar(); avisar('Esta vez no. Mañana hay otra pregunta.'); }
+        render(); break;
+      }
       case 'disponibilidad':
         l.acciones.disponibilidad = true; guardar(); avisar('Disponibilidad confirmada'); render(); break;
       case 'objecion':
@@ -642,8 +815,10 @@
       guardar(); avisar('Información del cliente guardada');
     } else if (form.id === 'form-coaching') {
       const d = new FormData(form);
-      yo().coaching.push({ fecha: new Date().toLocaleDateString('es-EC', { day: '2-digit', month: '2-digit' }), jefe: 'Jefe de agencia (prueba)', brecha: d.get('brecha'), accion: d.get('accion') });
-      guardar(); avisar('Sesión de coaching guardada'); render();
+      const horas = Number(d.get('horas'));
+      yo().coaching.push({ fecha: hoyCorto(), jefe: 'Jefe de agencia (prueba)', brecha: d.get('brecha'), accion: d.get('accion') });
+      sumar(horasItem(horas, 'Coaching con el jefe de agencia', 'Coaching'), '', `Coaching guardado: ${String(horas).replace('.', ',')} h de capacitación`);
+      render();
     } else if (form.id === 'form-evaluacion') {
       const c = curso(form.dataset.id), ec = estadoCurso(c.id), d = new FormData(form);
       const respuestas = c.preguntas.map((_, i) => Number(d.get('p' + i)));
@@ -659,7 +834,8 @@
       if (accion) ec.estado = 'completado';
       guardar();
       ultimoResultado = { id: c.id, nota, accion, respuestas };
-      if (accion) sumar(accion, c.nombre); else avisar(`Nota ${nota} %: no se aprobó`, 'menos');
+      if (accion) sumar([accion, horasItem(c.horas, 'Curso: ' + c.nombre, 'Curso')], c.nombre, `Curso aprobado y ${c.horas} h de capacitación`);
+      else avisar(`Nota ${nota} %: no se aprobó`, 'menos');
       location.hash = `#curso/${c.id}/resultado`;
     }
   });

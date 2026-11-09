@@ -25,8 +25,33 @@ window.CONFIG = {
     cursoNota70:              { puntos: +3, componente: 'desarrollo', motivo: 'Capacitación con nota de 70 a 79 %' },
     cursoVencido:             { puntos: -2, componente: 'desarrollo', motivo: 'Capacitación vencida sin completar' },
     // Propuesta (no está en el brief): para que el ranking también mida resultados comerciales.
-    ventaCerrada:             { puntos: +4, componente: 'resultados', motivo: 'Venta cerrada' }
+    ventaCerrada:             { puntos: +4, componente: 'resultados', motivo: 'Venta cerrada' },
+    // Pedido de la profesora (6/11): las horas de capacitación también dan puntos. Es POR HORA.
+    horasCapacitacion:        { puntos: +1, componente: 'desarrollo', motivo: 'Horas de capacitación registradas' },
+    // Capa de juego (propuesta nuestra, 9/11).
+    retoSemanal:              { puntos: +5, componente: 'gestion',    motivo: 'Reto de la semana cumplido' },
+    preguntaDelDia:           { puntos: +1, componente: 'desarrollo', motivo: 'Pregunta del día respondida bien' }
   },
+
+  // Horas de capacitación comercial: meta del KPI del Balanced Scorecard de la tesis.
+  capacitacion: { metaHorasAnio: 100 },
+
+  // Reto de la semana: uno a la vez, con su barra de progreso.
+  reto: { texto: 'Haz 5 seguimientos a tiempo esta semana', meta: 5 },
+
+  // Insignias que se desbloquean solas. 'medida' es lo que cuenta la app; 'meta' cuánto hace falta.
+  insignias: [
+    { id: 'lead-rapido', nombre: 'Respuesta rápida', descripcion: 'Atender un lead en menos de 1 hora', medida: 'leadsATiempo', meta: 1 },
+    { id: 'racha-5', nombre: 'Racha de 5 días', descripcion: '5 días seguidos con todos los leads a tiempo', medida: 'racha', meta: 5 },
+    { id: 'clientes-felices', nombre: 'Clientes felices', descripcion: '3 clientes con carita excelente en el mes', medida: 'caritasExcelentes', meta: 3 },
+    { id: 'objeciones-3', nombre: 'Buen argumento', descripcion: 'Resolver 3 objeciones', medida: 'objecionesResueltas', meta: 3 },
+    { id: 'horas-20', nombre: '20 horas de capacitación', descripcion: 'Acumular 20 horas en el año', medida: 'horas', meta: 20 },
+    { id: 'horas-50', nombre: '50 horas de capacitación', descripcion: 'Acumular 50 horas en el año', medida: 'horas', meta: 50 },
+    { id: 'horas-100', nombre: 'Meta anual de capacitación', descripcion: 'Llegar a las 100 horas del año', medida: 'horas', meta: 100 },
+    { id: 'trivia-5', nombre: 'Experto en producto', descripcion: 'Responder bien 5 preguntas del día', medida: 'preguntasCorrectas', meta: 5 },
+    { id: 'ruta-completa', nombre: 'Ruta completa', descripcion: 'Aprobar los 4 cursos', medida: 'cursos', meta: 4 },
+    { id: 'podio', nombre: 'En el podio', descripcion: 'Estar entre los 3 primeros del mes', medida: 'podio', meta: 1 }
+  ],
 
   componentes: {
     resultados: 'Resultados',
