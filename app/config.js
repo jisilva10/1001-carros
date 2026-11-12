@@ -20,21 +20,30 @@ window.CONFIG = {
     caritaExcelente:          { puntos: +5, componente: 'servicio',   motivo: 'Cliente calificó la atención como excelente' },
     caritaBuena:              { puntos: +3, componente: 'servicio',   motivo: 'Cliente calificó la atención como buena' },
     caritaAceptable:          { puntos: +1, componente: 'servicio',   motivo: 'Cliente calificó la atención como aceptable' },
-    cursoNota90:              { puntos: +7, componente: 'desarrollo', motivo: 'Capacitación a tiempo con nota de 90 a 100 %' },
-    cursoNota80:              { puntos: +5, componente: 'desarrollo', motivo: 'Capacitación con nota de 80 a 89 %' },
-    cursoNota70:              { puntos: +3, componente: 'desarrollo', motivo: 'Capacitación con nota de 70 a 79 %' },
-    cursoVencido:             { puntos: -2, componente: 'desarrollo', motivo: 'Capacitación vencida sin completar' },
+    // Capacitación del mes (regla del 12/11, reemplaza la del brief): la nota de la evaluación final
+    // da puntos y no completar las horas del mes resta. 95 cuenta como «95 a 100».
+    capacitacionNota95:       { puntos: +4, componente: 'desarrollo', motivo: 'Capacitación del mes con nota de 95 a 100' },
+    capacitacionNota91:       { puntos: +2, componente: 'desarrollo', motivo: 'Capacitación del mes con nota de 91 a 94' },
+    capacitacionIncompleta:   { puntos: -2, componente: 'desarrollo', motivo: 'Capacitación del mes sin completar las 8 horas' },
     // Propuesta (no está en el brief): para que el ranking también mida resultados comerciales.
     ventaCerrada:             { puntos: +4, componente: 'resultados', motivo: 'Venta cerrada' },
-    // Pedido de la profesora (6/11): las horas de capacitación también dan puntos. Es POR HORA.
-    horasCapacitacion:        { puntos: +1, componente: 'desarrollo', motivo: 'Horas de capacitación registradas' },
     // Capa de juego (propuesta nuestra, 9/11).
     retoSemanal:              { puntos: +5, componente: 'gestion',    motivo: 'Reto de la semana cumplido' },
     preguntaDelDia:           { puntos: +1, componente: 'desarrollo', motivo: 'Pregunta del día respondida bien' }
   },
 
-  // Horas de capacitación comercial: meta del KPI del Balanced Scorecard de la tesis.
-  capacitacion: { metaHorasAnio: 100 },
+  // Mis capacitaciones: 1 capacitación al mes, de 8 horas (12 al año = 96 h).
+  // El KPI del Balanced Scorecard de la tesis habla de 100 h al año: se muestra como referencia.
+  capacitacion: {
+    horasPorMes: 8,
+    kpiHorasAnio: 100,
+    // De la nota más alta a la más baja: la primera que se cumpla da sus puntos. Debajo de 91 no hay puntos.
+    notas: [
+      { desde: 95, accion: 'capacitacionNota95' },
+      { desde: 91, accion: 'capacitacionNota91' }
+    ],
+    actividades: ['Sesión de la capacitación', 'Taller práctico', 'Role play', 'Material de lectura']
+  },
 
   // Reto de la semana: uno a la vez, con su barra de progreso.
   reto: { texto: 'Haz 5 seguimientos a tiempo esta semana', meta: 5 },
@@ -45,11 +54,11 @@ window.CONFIG = {
     { id: 'racha-5', nombre: 'Racha de 5 días', descripcion: '5 días seguidos con todos los leads a tiempo', medida: 'racha', meta: 5 },
     { id: 'clientes-felices', nombre: 'Clientes felices', descripcion: '3 clientes con carita excelente en el mes', medida: 'caritasExcelentes', meta: 3 },
     { id: 'objeciones-3', nombre: 'Buen argumento', descripcion: 'Resolver 3 objeciones', medida: 'objecionesResueltas', meta: 3 },
-    { id: 'horas-20', nombre: '20 horas de capacitación', descripcion: 'Acumular 20 horas en el año', medida: 'horas', meta: 20 },
-    { id: 'horas-50', nombre: '50 horas de capacitación', descripcion: 'Acumular 50 horas en el año', medida: 'horas', meta: 50 },
-    { id: 'horas-100', nombre: 'Meta anual de capacitación', descripcion: 'Llegar a las 100 horas del año', medida: 'horas', meta: 100 },
+    { id: 'horas-40', nombre: '40 horas', descripcion: 'Acumular 40 horas de capacitación en el año', medida: 'horas', meta: 40 },
+    { id: 'horas-80', nombre: '80 horas', descripcion: 'Acumular 80 horas de capacitación en el año', medida: 'horas', meta: 80 },
+    { id: 'horas-96', nombre: 'Año completo', descripcion: 'Completar las 96 horas del año (12 × 8)', medida: 'horas', meta: 96 },
     { id: 'trivia-5', nombre: 'Experto en producto', descripcion: 'Responder bien 5 preguntas del día', medida: 'preguntasCorrectas', meta: 5 },
-    { id: 'ruta-completa', nombre: 'Ruta completa', descripcion: 'Aprobar los 4 cursos', medida: 'cursos', meta: 4 },
+    { id: 'excelencia', nombre: 'Excelencia', descripcion: '6 capacitaciones con nota de 95 o más', medida: 'notas95', meta: 6 },
     { id: 'podio', nombre: 'En el podio', descripcion: 'Estar entre los 3 primeros del mes', medida: 'podio', meta: 1 }
   ],
 

@@ -5,8 +5,12 @@
 */
 (function () {
   const C = window.CONFIG, D = window.DATOS;
-  const CLAVE = 'app-asesor-1001-v3';
+  const CLAVE = 'app-asesor-1001-v4';
   const SLA = C.leads.minutosMaximoRespuesta;
+  const HPM = C.capacitacion.horasPorMes;
+  const META_ANIO = HPM * 12;
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const MES_CORTO = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
   // ---------- Estado guardado ----------
   const copia = o => JSON.parse(JSON.stringify(o));
@@ -17,7 +21,12 @@
   function guardar() { try { localStorage.setItem(CLAVE, JSON.stringify(s)); } catch (e) { /* nada */ } }
   let s = cargar();
 
-  const inicioMes = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); })();
+  const hoy = new Date();
+  const mesActual = hoy.getMonth();
+  const inicioMes = new Date(hoy.getFullYear(), mesActual, 1).getTime();
+  const diasDelMes = new Date(hoy.getFullYear(), mesActual + 1, 0).getDate();
+  const dos = n => String(n).padStart(2, '0');
+  const hoyCorto = () => { const d = new Date(); return `${dos(d.getDate())}/${dos(d.getMonth() + 1)}`; };
 
   // Fechas repartidas en lo que va del mes para el historial de ejemplo.
   function historialSembrado(claves) {
@@ -34,11 +43,15 @@
         acciones: copia(l.acciones || {}), vencido: false, vendido: false, seguimientoHecho: false
       })),
       semana: copia(D.semana),
-      cursos: D.cursos.map(c => ({ id: c.id, estado: c.estado, notaInicial: c.notaInicial || null, notaFinal: c.notaFinal || null })),
+      // La capacitación del mes en curso: sesiones registradas y notas de la evaluación.
+      cap: {
+        sesiones: D.sesionesMesActual.filter(x => x.dia <= hoy.getDate()).map(x => ({ fecha: `${dos(x.dia)}/${dos(mesActual + 1)}`, actividad: x.actividad, horas: x.horas })),
+        notaInicial: D.capacitaciones[mesActual].resultado.notaInicial,
+        notaFinal: null
+      },
       objeciones: copia(D.objecionesPrevias),
       coaching: copia(D.coaching),
       kit: [],
-      horas: copia(D.horasPrevias),
       racha: { dias: D.juego.racha, hoy: null },
       reto: { avance: D.juego.retoAvance, cumplido: false },
       pregunta: { correctas: D.juego.preguntasCorrectas, fecha: null, elegida: null },
@@ -50,7 +63,6 @@
   const yo = () => s.porUsuario[s.usuario];
 
   // ---------- Puntos ----------
-  // Una entrada puede traer sus propios puntos (las horas de capacitación suman por hora).
   const valor = h => (h.puntos != null ? h.puntos : C.acciones[h.accion].puntos);
   const puntosDe = hist => C.puntosInicioMes + hist.reduce((t, h) => t + valor(h), 0);
   const ventasDe = hist => hist.filter(h => h.accion === 'ventaCerrada').length;
@@ -64,7 +76,6 @@
   }
   const posicion = id => tabla().findIndex(f => f.a.id === id) + 1;
 
-  // Registra una o varias acciones con puntos y avisa cuánto sumó o restó.
   // Cada elemento es una clave de CONFIG.acciones o { accion, puntos, detalle }.
   function sumar(items, detalle, texto) {
     items = [].concat(items).map(x => (typeof x === 'string' ? { accion: x } : x));
@@ -76,30 +87,45 @@
     avisar(`${total > 0 ? '+' : '−'}${Math.abs(total)} puntos · ${texto || motivo}`, total > 0 ? 'mas' : 'menos');
   }
 
-  // ---------- Horas de capacitación ----------
-  const dos = n => String(n).padStart(2, '0');
-  const hoyCorto = () => { const d = new Date(); return `${dos(d.getDate())}/${dos(d.getMonth() + 1)}`; };
-  const horasDe = id => (s.porUsuario[id] ? s.porUsuario[id].horas.reduce((t, h) => t + h.horas, 0) : asesor(id).horasAnio);
-  const mesCorto = () => dos(new Date().getMonth() + 1);
-  const horasDelMes = () => yo().horas.filter(h => h.fecha.slice(3) === mesCorto()).reduce((t, h) => t + h.horas, 0);
-  // Ritmo esperado: la parte de la meta anual que correspondería a la fecha de hoy.
-  function horasEsperadas() {
-    const d = new Date(), inicio = new Date(d.getFullYear(), 0, 1);
-    return Math.round(C.capacitacion.metaHorasAnio * (d - inicio) / (365 * 864e5));
+  // ---------- Mis capacitaciones ----------
+  const horasMes = () => yo().cap.sesiones.reduce((t, x) => t + x.horas, 0);
+  const faltanHoras = () => Math.max(0, HPM - horasMes());
+  const diasRestantes = () => diasDelMes - hoy.getDate();
+  // Cómo está la capacitación de un mes: las pasadas salen de los datos, la del mes de la app.
+  function capDe(i) {
+    const d = D.capacitaciones[i];
+    if (i < mesActual) {
+      const r = d.resultado, ok = r.horas >= HPM && r.notaFinal != null;
+      return { estado: ok ? 'completada' : 'incompleta', horas: r.horas, notaInicial: r.notaInicial, notaFinal: r.notaFinal };
+    }
+    if (i === mesActual) {
+      const c = yo().cap;
+      return { estado: c.notaFinal != null ? 'completada' : 'encurso', horas: horasMes(), notaInicial: c.notaInicial, notaFinal: c.notaFinal };
+    }
+    return { estado: 'pendiente', horas: 0, notaInicial: null, notaFinal: null };
   }
-  // Anota las horas y devuelve la entrada de puntos que les corresponde.
-  function horasItem(horas, actividad, tipo) {
-    yo().horas.push({ fecha: hoyCorto(), actividad, horas, tipo });
-    return { accion: 'horasCapacitacion', puntos: horas * C.acciones.horasCapacitacion.puntos, detalle: `${actividad} · ${horas} h` };
+  function accionNota(nota) {
+    const t = C.capacitacion.notas.find(x => nota >= x.desde);
+    return t ? t.accion : null;
   }
+  function puntosDeMes(i) {
+    const c = capDe(i);
+    if (c.estado === 'incompleta') return C.acciones.capacitacionIncompleta.puntos;
+    if (c.notaFinal == null) return null;
+    const a = accionNota(c.notaFinal);
+    return a ? C.acciones[a].puntos : 0;
+  }
+  const horasDe = id => (id === s.usuario && yo() ? D.capacitaciones.reduce((t, _, i) => t + (i <= mesActual ? capDe(i).horas : 0), 0) : asesor(id).horasAnio);
+  // Ritmo esperado: lo que tocaría llevar a la fecha (meses cerrados más la parte del mes).
+  const horasEsperadas = () => Math.round(HPM * (mesActual + hoy.getDate() / diasDelMes));
 
   // ---------- Capa de juego ----------
   function sumarRacha() {
-    const r = yo().racha, hoy = hoyCorto();
-    if (r.hoy !== hoy) { r.dias++; r.hoy = hoy; }
+    const r = yo().racha, d = hoyCorto();
+    if (r.hoy !== d) { r.dias++; r.hoy = d; }
   }
   function preguntaHoy() {
-    const d = new Date(), n = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
+    const n = Math.floor((hoy - new Date(hoy.getFullYear(), 0, 0)) / 864e5);
     return D.preguntasDelDia[n % D.preguntasDelDia.length];
   }
   function medidas() {
@@ -111,7 +137,7 @@
       objecionesResueltas: e.objeciones.filter(o => o.resuelta).length,
       horas: horasDe(s.usuario),
       preguntasCorrectas: e.pregunta.correctas,
-      cursos: e.cursos.filter(c => c.estado === 'completado').length,
+      notas95: D.capacitaciones.filter((_, i) => i <= mesActual && (capDe(i).notaFinal || 0) >= 95).length,
       podio: posicion(s.usuario) <= 3 ? 1 : 0
     };
   }
@@ -142,7 +168,7 @@
     if (l.vencido) return 'Venció el tiempo';
     const r = SLA - minutos(l);
     const mm = Math.floor(r), ss = Math.floor((r - mm) * 60);
-    return `Quedan ${mm}:${String(ss).padStart(2, '0')}`;
+    return `Quedan ${mm}:${dos(ss)}`;
   }
   function haceCuanto(l) {
     const m = Math.floor(minutos(l));
@@ -152,6 +178,7 @@
   const leadsOrdenados = () => yo().leads.slice().sort((a, b) => ORDEN[estadoLead(a)] - ORDEN[estadoLead(b)] || (a.atendido ? 0 : minutos(b) - minutos(a)));
   const lead = id => yo().leads.find(l => l.id === id);
   const pctSemana = () => { const w = yo().semana; return w.total ? Math.round(w.dentroDelTiempo / w.total * 1000) / 10 : 100; };
+  const seguimientosHoy = () => yo().leads.filter(l => l.seguimientoHoy && !l.seguimientoHecho && !l.vendido).sort((x, y) => x.seguimientoHoy.localeCompare(y.seguimientoHoy));
 
   function atenderLead(l) {
     const w = yo().semana;
@@ -169,7 +196,7 @@
 
   // Revisa cada segundo los tiempos de los leads: actualiza relojes y resta si alguno vence.
   function revisarTiempos() {
-    if (!s.usuario) return;
+    if (!s.usuario || !yo()) return;
     let cambio = false;
     yo().leads.forEach(l => {
       if (!l.atendido && !l.vencido && minutos(l) >= SLA) {
@@ -177,8 +204,7 @@
         yo().racha.dias = 0; yo().racha.hoy = hoyCorto();
         sumar('leadVencido', l.nombre);
       }
-      const el = document.querySelectorAll(`[data-reloj="${l.id}"]`);
-      el.forEach(x => { x.textContent = reloj(l); });
+      document.querySelectorAll(`[data-reloj="${l.id}"]`).forEach(x => { x.textContent = reloj(l); });
       const est = estadoLead(l);
       if (l._ultimo && l._ultimo !== est) cambio = true;
       l._ultimo = est;
@@ -186,87 +212,89 @@
     if (cambio && ['inicio', 'leads'].includes(ruta()[0])) render();
   }
 
-  // ---------- Cursos ----------
-  const curso = id => D.cursos.find(c => c.id === id);
-  const estadoCurso = id => yo().cursos.find(c => c.id === id);
-  function recomendacion() {
+  // Refuerzo: si hay objeciones sin resolver, se sugiere volver a la capacitación que las trata.
+  function refuerzo() {
     const sin = {};
     yo().objeciones.filter(o => !o.resuelta).forEach(o => { sin[o.tipo] = (sin[o.tipo] || 0) + 1; });
     const [tipo, n] = Object.entries(sin).sort((a, b) => b[1] - a[1])[0] || [];
-    const c2 = estadoCurso('c2');
-    if (n >= 2 && c2.estado !== 'completado') {
-      return { curso: curso('c2'), motivo: `Tienes ${n} objeciones de ${D.objeciones[tipo].nombre.toLowerCase()} sin resolver este mes.` };
-    }
-    const sig = yo().cursos.find(c => c.estado !== 'completado');
-    return sig ? { curso: curso(sig.id), motivo: 'Es el siguiente curso de tu ruta.' } : null;
-  }
-  function puntosCurso(nota) {
-    return nota >= 90 ? 'cursoNota90' : nota >= 80 ? 'cursoNota80' : nota >= 70 ? 'cursoNota70' : null;
+    if (!n || n < 2) return null;
+    const i = D.capacitaciones.findIndex((c, k) => k < mesActual && /objeciones/i.test(c.nombre));
+    return i < 0 ? null : { i, motivo: `Tienes ${n} objeciones de ${D.objeciones[tipo].nombre.toLowerCase()} sin resolver este mes.` };
   }
 
   // ---------- Utilidades de dibujo ----------
   const $ = sel => document.querySelector(sel);
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   const iniciales = n => n.split(' ').map(p => p[0]).slice(0, 2).join('');
-  const nombreMes = () => new Date().toLocaleDateString('es-EC', { month: 'long', year: 'numeric' });
   const fecha = t => new Date(t).toLocaleDateString('es-EC', { day: 'numeric', month: 'short' });
-  const signo = p => (p > 0 ? '+' : '−') + Math.abs(p);
+  const signo = p => (p > 0 ? '+' : p < 0 ? '−' : '') + Math.abs(p);
+  const h = n => String(n).replace('.', ',') + ' h';
+  const num = (n, u) => (n == null ? '—' : n.toLocaleString('es-EC', { maximumFractionDigits: 1, minimumFractionDigits: u === '%' ? 1 : 0 }) + (u ? ' ' + u : ''));
+  const I = (d, extra) => `<svg viewBox="0 0 24 24" ${extra || ''}><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const ICONO = {
-    check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#FBCA01" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    reloj: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-    llamada: '<svg viewBox="0 0 24 24"><path d="M6 3.5h3l1.5 4-2 1.3a10 10 0 005 5l1.3-2 4 1.5v3a2 2 0 01-2 2A15 15 0 014 5.5a2 2 0 012-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
-    curso: '<svg viewBox="0 0 24 24"><path d="M3 8l9-4 9 4-9 4zM7 10v5c1.5 1.5 3 2 5 2s3.5-.5 5-2v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
-    lista: '<svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
-    chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v10H9l-5 4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
-    regalo: '<svg viewBox="0 0 24 24"><path d="M4 10h16v10H4zM3 7h18v3H3zM12 7v13M12 7c-2-3-5-3-5-1s3 1 5 1zm0 0c2-3 5-3 5-1s-3 1-5 1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-    volver: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    reloj: I('M12 3.5a8.5 8.5 0 100 17 8.5 8.5 0 000-17zM12 7.5V12l3 2'),
+    llamada: I('M6 3.5h3l1.5 4-2 1.3a10 10 0 005 5l1.3-2 4 1.5v3a2 2 0 01-2 2A15 15 0 014 5.5a2 2 0 012-2z'),
+    curso: I('M3 8l9-4 9 4-9 4zM7 10v5c1.5 1.5 3 2 5 2s3.5-.5 5-2v-5'),
+    leads: I('M9 11a3.2 3.2 0 100-6.4A3.2 3.2 0 009 11zM3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M16 6.5h5M16 10.5h5M17.5 14.5H21'),
+    proceso: I('M4 6h16M4 12h10M4 18h6'),
+    premio: I('M8 21h8M12 17v4M7 4h10v4a5 5 0 01-10 0zM7 6H4a3 3 0 003 4M17 6h3a3 3 0 01-3 4'),
+    lista: I('M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01'),
+    chat: I('M4 5h16v10H9l-5 4z'),
+    regalo: I('M4 10h16v10H4zM3 7h18v3H3zM12 7v13M12 7c-2-3-5-3-5-1s3 1 5 1zm0 0c2-3 5-3 5-1s-3 1-5 1z'),
+    candado: I('M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 017 0v3'),
+    volver: I('M15 5l-7 7 7 7', 'width="22" height="22"'),
+    mas: I('M12 5v14M5 12h14')
   };
   function carita(tipo) {
     const boca = { excelente: 'M7 13h10c-.6 3.2-2.8 4.6-5 4.6S7.6 16.2 7 13z', buena: 'M8 14c1.3 1.6 6.7 1.6 8 0', aceptable: 'M8 15h8' }[tipo];
     return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#FBCA01"/><circle cx="8.6" cy="9.5" r="1.3" fill="#240079"/><circle cx="15.4" cy="9.5" r="1.3" fill="#240079"/><path d="${boca}" fill="${tipo === 'excelente' ? '#240079' : 'none'}" stroke="#240079" stroke-width="1.8" stroke-linecap="round"/></svg>`;
   }
+  const MEDALLA = '<svg viewBox="0 0 24 24"><path d="M8 14.5L6 22l6-3 6 3-2-7.5" fill="currentColor" opacity=".5"/><circle cx="12" cy="9.5" r="7" fill="currentColor"/><path d="M12 5.8l1.2 2.5 2.7.4-2 1.9.5 2.7L12 12l-2.4 1.3.5-2.7-2-1.9 2.7-.4z" fill="#fff"/></svg>';
+  const barra = (v, max, cls) => `<div class="progreso ${cls || ''}"><span style="width:${Math.max(0, Math.min(100, v / max * 100))}%"></span></div>`;
+  const chipEstado = est => `<span class="chip ${est === 'vendido' ? 'morado' : est}">${NOMBRE_ESTADO[est]}</span>`;
 
   // ---------- El carro de progreso ----------
   let ultimoPct = null; // posición donde se vio el carro por última vez, para animar el cambio
   function pct(p) { const k = C.carro; return Math.max(0, Math.min(100, (p - k.puntosMinimo) / (k.puntosMeta - k.puntosMinimo) * 100)); }
-  function pistaHTML(puntos, grande) {
+  const lugar = v => `calc(46px + (100% - 92px) * ${v / 100})`;
+  function pistaHTML(puntos) {
     const k = C.carro, desde = ultimoPct == null ? pct(puntos) : ultimoPct;
-    const lugar = v => `calc(48px + (100% - 96px) * ${v / 100})`;
-    return `<div class="pista ${grande ? 'grande' : ''}" data-pct="${pct(puntos)}">
-      <div class="pista-camino"><div class="pista-avance" style="width:${lugar(desde)}"></div><div class="pista-linea"></div></div>
-      <span class="pista-marca" style="left:${lugar(pct(k.puntosInicio))}">Inicio del mes · ${k.puntosInicio}</span>
-      <span class="pista-marca meta" style="left:${lugar(100)}">Meta · ${k.puntosMeta}</span>
+    return `<div class="pista" data-pct="${pct(puntos)}">
       <img class="pista-carro" src="img/carro.png" alt="Carro de progreso" style="left:${lugar(desde)}">
+      <div class="pista-camino"><div class="pista-avance" style="width:${lugar(desde)}"></div></div>
+      <div class="pista-marcas"><span style="left:${lugar(pct(k.puntosInicio))}">${k.puntosInicio} · inicio</span><span class="meta" style="left:${lugar(100)}">${k.puntosMeta} · meta</span></div>
     </div>`;
   }
   function moverCarro() {
     const pista = $('.pista');
     if (!pista) return;
-    const v = Number(pista.dataset.pct), lugar = `calc(48px + (100% - 96px) * ${v / 100})`;
+    const v = Number(pista.dataset.pct);
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      pista.querySelector('.pista-carro').style.left = lugar;
-      pista.querySelector('.pista-avance').style.width = lugar;
+      pista.querySelector('.pista-carro').style.left = lugar(v);
+      pista.querySelector('.pista-avance').style.width = lugar(v);
     }));
     ultimoPct = v;
   }
 
   // ---------- Pantallas ----------
   const ruta = () => (location.hash.slice(1) || 'inicio').split('/');
+  const seccion = (titulo, enlace) => `<h2 class="seccion">${titulo}${enlace || ''}</h2>`;
 
   function pLogin() {
     return {
       sinBarra: true, sinPestanas: true,
       html: `<div class="login">
         <div class="login-marca">1001Carros</div>
-        <div class="login-sub">${esc(C.nombreApp)} · prototipo con datos de prueba</div>
+        <div class="login-sub">${esc(C.nombreApp)}</div>
         <img src="img/carro.png" alt="">
-        <form class="tarjeta" id="form-login">
-          <label class="campo"><span>Usuario</span><input id="usuario" autocomplete="off" placeholder="Escribe o elige un usuario de prueba" value="${esc(asesor(D.asesores[0].id).nombre)}"></label>
-          <div class="usuarios">${D.asesores.map((a, i) => `<button type="button" data-usuario="${a.id}" class="${i === 0 ? 'activo' : ''}">${esc(a.nombre)}</button>`).join('')}</div>
+        <form class="login-form" id="form-login">
+          <label class="campo"><span>Usuario</span><input id="usuario" autocomplete="off" placeholder="Escribe o elige un usuario de prueba" value="${esc(D.asesores[0].nombre)}"></label>
+          <div class="usuarios">${D.asesores.map((a, i) => `<button type="button" data-usuario="${a.id}" class="${i === 0 ? 'activo' : ''}">${esc(a.nombre.split(' ')[0])}</button>`).join('')}</div>
           <button class="boton" type="submit">Entrar</button>
-          <p class="nota">Es un prototipo: entra con cualquier usuario de prueba y no pide clave. En la versión real se ingresaría con el usuario de la empresa.</p>
+          <p class="nota">Prototipo con datos de prueba: entra con cualquier usuario y no pide clave.</p>
         </form>
-        <button class="boton-texto" style="color:#fff" data-accion="reiniciar">Reiniciar la demo</button>
+        <button class="boton-texto claro" data-accion="reiniciar">Reiniciar la demo</button>
       </div>`
     };
   }
@@ -274,76 +302,81 @@
   function pInicio() {
     const e = yo(), a = asesor(s.usuario), p = puntosDe(e.historial), pos = posicion(s.usuario), ventas = ventasDe(e.historial);
     const urgentes = e.leads.filter(l => estadoLead(l) === 'urgente');
-    const segs = e.leads.filter(l => l.seguimientoHoy && !l.seguimientoHecho && !l.vendido).sort((x, y) => x.seguimientoHoy.localeCompare(y.seguimientoHoy));
-    const c2 = estadoCurso('c2'), rec = recomendacion();
-    let alertas = '';
+    let tareas = '';
     urgentes.forEach(l => {
-      alertas += `<a class="alerta" href="#lead/${l.id}"><div class="alerta-icono urgente">${ICONO.reloj}</div><div class="alerta-cuerpo"><strong>${l.vencido ? 'Lead sin gestión' : 'Lead por vencer'}: ${esc(l.nombre)}</strong><span data-reloj="${l.id}">${reloj(l)}</span></div><span class="flecha">›</span></a>`;
+      tareas += `<a class="fila" href="#lead/${l.id}"><span class="icono rojo">${ICONO.reloj}</span><span class="fila-cuerpo"><strong>${l.vencido ? 'Lead sin gestión' : 'Lead por vencer'}</strong><span class="sub">${esc(l.nombre)} · <span data-reloj="${l.id}">${reloj(l)}</span></span></span><span class="flecha">›</span></a>`;
     });
-    segs.forEach(l => {
-      alertas += `<a class="alerta" href="#acciones/${l.id}"><div class="alerta-icono pendiente">${ICONO.llamada}</div><div class="alerta-cuerpo"><strong>Seguimiento hoy ${esc(l.seguimientoHoy)}</strong><span>${esc(l.nombre)} · ${esc(l.proximaAccion)}</span></div><span class="flecha">›</span></a>`;
+    seguimientosHoy().forEach(l => {
+      tareas += `<a class="fila" href="#acciones/${l.id}"><span class="icono naranja">${ICONO.llamada}</span><span class="fila-cuerpo"><strong>Seguimiento a las ${esc(l.seguimientoHoy)}</strong><span class="sub">${esc(l.nombre)}</span></span><span class="flecha">›</span></a>`;
     });
-    if (c2.estado !== 'completado') {
-      alertas += `<a class="alerta" href="#curso/c2"><div class="alerta-icono morado">${ICONO.curso}</div><div class="alerta-cuerpo"><strong>Curso por vencer: ${esc(curso('c2').nombre)}</strong><span>${esc(curso('c2').vence)}</span></div><span class="flecha">›</span></a>`;
+    const cap = capDe(mesActual);
+    if (cap.estado === 'encurso') {
+      const falta = faltanHoras();
+      tareas += `<a class="fila" href="#capacitacion/${mesActual}"><span class="icono morado">${ICONO.curso}</span><span class="fila-cuerpo"><strong>${falta > 0 ? `Te faltan ${h(falta)} de capacitación` : 'Ya puedes dar la evaluación final'}</strong><span class="sub">${esc(D.capacitaciones[mesActual].nombre)} · quedan ${diasRestantes()} días</span></span><span class="flecha">›</span></a>`;
     }
-    const cursosHechos = e.cursos.filter(c => c.estado === 'completado').length;
     return {
-      barra: { titulo: `Hola, ${a.nombre.split(' ')[0]}`, sub: `${nombreMes()} · los puntos se reinician el 1.º de cada mes`, alta: true },
+      barra: { marca: true },
       pestana: 'inicio',
-      html: `<div class="tarjeta subir">
-          <div class="perfil"><div class="avatar">${iniciales(a.nombre)}</div><div><div class="perfil-nombre">${esc(a.nombre)}</div><div class="muted pequeno">${esc(a.agencia)}</div></div></div>
-          <div class="cifras">
-            <div><span class="cifra">${p}</span><span class="cifra-label">Puntos</span></div>
-            <div><a href="#ranking"><span class="cifra">${pos}.º</span><span class="cifra-label">en el ranking</span></a></div>
-            <div><span class="cifra">${ventas}/${C.metaVentasMes}</span><span class="cifra-label">Ventas del mes</span></div>
-          </div>
+      html: `<section class="hero">
+          <p class="saludo">Hola, ${esc(a.nombre.split(' ')[0])}</p>
+          <p class="hero-label">Tus puntos de ${MESES[mesActual]}</p>
+          <p class="hero-cifra">${p}</p>
+          <p class="hero-sub"><a href="#ranking">${pos}.º en el ranking</a> · empezaste con ${C.puntosInicioMes}</p>
           ${pistaHTML(p)}
-          <div class="meta-ventas"><div class="meta-ventas-fila"><span>Meta mensual de ventas</span><strong>${ventas} de ${C.metaVentasMes}</strong></div><div class="barra-progreso amarilla"><span style="width:${Math.min(100, ventas / C.metaVentasMes * 100)}%"></span></div></div>
-        </div>
-        <h2 class="titulo-seccion">Lo que requiere atención hoy</h2>
-        <div class="tarjeta">${alertas || '<p class="muted">Todo al día. Buen trabajo.</p>'}</div>
+          <div class="kpis">
+            <a href="#progreso"><strong>${ventas}<small>/${C.metaVentasMes}</small></strong><span>Ventas</span></a>
+            <a href="#capacitaciones"><strong>${num(horasMes())}<small>/${HPM} h</small></strong><span>Capacitación</span></a>
+            <a href="#leads"><strong>${num(pctSemana())}<small> %</small></strong><span>Leads a tiempo</span></a>
+          </div>
+        </section>
+        ${seccion('Para hoy')}
+        <div class="tarjeta lista">${tareas || '<p class="vacio">Todo al día.</p>'}</div>
         ${juegoHTML()}
-        <h2 class="titulo-seccion">Módulos</h2>
-        <div class="modulos">
-          <a class="modulo" href="#leads"><span class="modulo-num">Módulo 1</span><span class="modulo-nombre">Gestión de leads</span><span class="modulo-dato">${urgentes.length} urgente${urgentes.length === 1 ? '' : 's'} · ${pctSemana()} % a tiempo</span></a>
-          <a class="modulo" href="#leads"><span class="modulo-num">Módulo 2</span><span class="modulo-nombre">Proceso comercial</span><span class="modulo-dato">Acciones, objeciones y cierre por cliente</span></a>
-          <a class="modulo" href="#desarrollo"><span class="modulo-num">Módulo 3</span><span class="modulo-nombre">Desarrollo y desempeño</span><span class="modulo-dato">${cursosHechos} de ${D.cursos.length} cursos${rec ? ' · 1 recomendado' : ''}</span></a>
-          <a class="modulo" href="#ranking"><span class="modulo-num">Módulo 4</span><span class="modulo-nombre">Incentivos y motivación</span><span class="modulo-dato">Puesto ${pos} · ver premios</span></a>
+        ${seccion('Módulos')}
+        <div class="tarjeta lista">
+          <a class="fila" href="#leads"><span class="icono">${ICONO.leads}</span><span class="fila-cuerpo"><strong>Gestión de leads</strong><span class="sub">${urgentes.length} urgente${urgentes.length === 1 ? '' : 's'} · ${seguimientosHoy().length} seguimientos hoy</span></span><span class="flecha">›</span></a>
+          <a class="fila" href="#leads"><span class="icono">${ICONO.proceso}</span><span class="fila-cuerpo"><strong>Proceso comercial</strong><span class="sub">Acciones, objeciones y cierre desde cada cliente</span></span><span class="flecha">›</span></a>
+          <a class="fila" href="#capacitaciones"><span class="icono">${ICONO.curso}</span><span class="fila-cuerpo"><strong>Mis capacitaciones</strong><span class="sub">${h(horasMes())} de ${HPM} este mes · ${horasDe(s.usuario)} h en el año</span></span><span class="flecha">›</span></a>
+          <a class="fila" href="#ranking"><span class="icono">${ICONO.premio}</span><span class="fila-cuerpo"><strong>Incentivos</strong><span class="sub">Puesto ${pos} · premios del mes</span></span><span class="flecha">›</span></a>
         </div>`,
       despues: moverCarro
     };
   }
 
-  const MEDALLA = '<svg viewBox="0 0 24 24"><path d="M8 14.5L6 22l6-3 6 3-2-7.5" fill="currentColor" opacity=".55"/><circle cx="12" cy="9.5" r="7" fill="currentColor"/><path d="M12 5.8l1.2 2.5 2.7.4-2 1.9.5 2.7L12 12l-2.4 1.3.5-2.7-2-1.9 2.7-.4z" fill="#fff"/></svg>';
   function juegoHTML() {
     const e = yo(), r = e.reto, q = preguntaHoy(), respondida = e.pregunta.fecha === hoyCorto();
     const puntos = Array.from({ length: 7 }, (_, i) => `<span class="${i < Math.min(e.racha.dias, 7) ? 'on' : ''}"></span>`).join('');
-    const pregunta = respondida
+    const opciones = respondida
       ? `${q.opciones.map((o, i) => `<div class="opcion-dia ${i === q.correcta ? 'correcta' : i === e.pregunta.elegida ? 'incorrecta' : ''}">${esc(o)}</div>`).join('')}
-         <p class="muted pequeno" style="margin-top:8px">${e.pregunta.elegida === q.correcta ? `Correcto, +${C.acciones.preguntaDelDia.puntos} punto.` : 'Esta vez no.'} ${esc(q.explicacion)} Mañana hay otra.</p>`
+         <p class="sub" style="margin-top:10px">${e.pregunta.elegida === q.correcta ? `Correcto, +${C.acciones.preguntaDelDia.puntos} punto.` : 'Esta vez no.'} ${esc(q.explicacion)}</p>`
       : q.opciones.map((o, i) => `<button class="opcion-dia" data-accion="pregunta" data-op="${i}">${esc(o)}</button>`).join('');
-    return `<h2 class="titulo-seccion">Tu juego de la semana <a href="#logros">Ver logros</a></h2>
+    return `${seccion('Esta semana', '<a href="#logros">Logros</a>')}
       <div class="juego">
-        <div class="tarjeta"><span class="juego-label">Racha</span><span class="juego-cifra">${e.racha.dias} día${e.racha.dias === 1 ? '' : 's'}</span><span class="muted pequeno">seguidos con todo a tiempo</span><div class="racha">${puntos}</div></div>
-        <a class="tarjeta" href="#logros"><span class="juego-label">Insignias</span><span class="juego-cifra">${e.insignias.length} de ${C.insignias.length}</span><span class="muted pequeno">desbloqueadas</span><div class="medallas">${C.insignias.slice(0, 5).map(i => `<span class="${e.insignias.includes(i.id) ? 'on' : ''}">${MEDALLA}</span>`).join('')}</div></a>
+        <div class="tarjeta"><span class="etiqueta">Racha</span><span class="juego-cifra">${e.racha.dias} <small>día${e.racha.dias === 1 ? '' : 's'}</small></span><div class="racha">${puntos}</div></div>
+        <a class="tarjeta" href="#logros"><span class="etiqueta">Insignias</span><span class="juego-cifra">${e.insignias.length} <small>de ${C.insignias.length}</small></span><div class="medallas">${C.insignias.slice(0, 6).map(i => `<span class="${e.insignias.includes(i.id) ? 'on' : ''}">${MEDALLA}</span>`).join('')}</div></a>
       </div>
-      <div class="tarjeta reto"><div class="meta-ventas-fila"><span><span class="juego-label">Reto de la semana</span><br><strong>${esc(C.reto.texto)}</strong></span><span class="chip ${r.cumplido ? 'aldia' : 'morado'}">${r.cumplido ? 'Cumplido' : `+${C.acciones.retoSemanal.puntos} pts`}</span></div>
-        <div class="barra-progreso amarilla"><span style="width:${Math.min(100, r.avance / C.reto.meta * 100)}%"></span></div><div class="muted pequeno" style="margin-top:4px">${Math.min(r.avance, C.reto.meta)} de ${C.reto.meta}</div></div>
-      <div class="tarjeta pregunta-dia"><div class="meta-ventas-fila"><span class="juego-label">Pregunta del día</span><span class="muted pequeno">+${C.acciones.preguntaDelDia.puntos} punto · 10 segundos</span></div>
-        <strong>${esc(q.texto)}</strong><div class="opciones-dia">${pregunta}</div></div>`;
+      <div class="tarjeta">
+        <div class="fila-tope"><span class="etiqueta">Reto de la semana</span><span class="chip ${r.cumplido ? 'aldia' : 'premio'}">${r.cumplido ? 'Cumplido' : `+${C.acciones.retoSemanal.puntos} pts`}</span></div>
+        <p class="texto-fuerte">${esc(C.reto.texto)}</p>
+        ${barra(r.avance, C.reto.meta, 'amarilla')}<p class="sub" style="margin-top:6px">${Math.min(r.avance, C.reto.meta)} de ${C.reto.meta}</p>
+      </div>
+      <div class="tarjeta">
+        <div class="fila-tope"><span class="etiqueta">Pregunta del día</span><span class="sub">+${C.acciones.preguntaDelDia.puntos} punto</span></div>
+        <p class="texto-fuerte">${esc(q.texto)}</p><div class="opciones-dia">${opciones}</div>
+      </div>`;
   }
 
   function pLogros() {
     const e = yo(), m = medidas();
     return {
-      barra: { titulo: 'Mis logros', sub: `${e.insignias.length} de ${C.insignias.length} insignias`, volver: '#progreso' },
+      barra: { titulo: 'Logros', sub: `${e.insignias.length} de ${C.insignias.length} insignias`, volver: '#inicio' },
       pestana: 'progreso',
       html: `<div class="insignias">${C.insignias.map(i => {
           const ok = e.insignias.includes(i.id), avance = Math.min(m[i.medida], i.meta);
-          return `<div class="insignia ${ok ? 'on' : ''}"><div class="insignia-icono">${MEDALLA}</div><strong>${esc(i.nombre)}</strong><span class="muted pequeno">${esc(i.descripcion)}</span>
-            ${ok ? '<span class="chip aldia">Desbloqueada</span>' : `<div class="barra-progreso" style="width:100%"><span style="width:${avance / i.meta * 100}%"></span></div><span class="muted pequeno">${avance} de ${i.meta}</span>`}</div>`;
+          return `<div class="insignia ${ok ? 'on' : ''}"><div class="insignia-icono">${MEDALLA}</div><strong>${esc(i.nombre)}</strong><span class="sub">${esc(i.descripcion)}</span>
+            ${ok ? '<span class="chip aldia">Desbloqueada</span>' : `${barra(avance, i.meta)}<span class="sub">${avance} de ${i.meta}</span>`}</div>`;
         }).join('')}</div>
-        <p class="nota">Las insignias se desbloquean solas con lo que registras. No dan puntos: son reconocimiento.</p>`
+        <p class="nota">Las insignias se desbloquean solas con lo que registras. Son reconocimiento: no dan puntos.</p>`
     };
   }
 
@@ -351,23 +384,24 @@
   function pLeads() {
     const e = yo(), lista = leadsOrdenados().filter(l => filtro === 'todos' || estadoLead(l) === filtro);
     const cuenta = k => e.leads.filter(l => estadoLead(l) === k).length;
-    const segs = e.leads.filter(l => l.seguimientoHoy && !l.seguimientoHecho && !l.vendido).sort((x, y) => x.seguimientoHoy.localeCompare(y.seguimientoHoy));
-    const w = e.semana;
+    const w = e.semana, segs = seguimientosHoy();
     return {
       barra: { titulo: 'Mis leads', sub: 'Asignados desde Sugar (simulado)' },
       pestana: 'leads',
-      html: `<div class="tarjeta" style="margin-top:14px">
-          <div class="sla"><span class="sla-cifra">${pctSemana()} %</span><div class="sla-cuerpo"><strong>Atendidos a tiempo esta semana</strong><div class="muted">${w.dentroDelTiempo} de ${w.total} dentro de ${SLA} min · meta ${C.leads.porcentajeSemanal} % (+${C.acciones.slaSemanal.puntos} pts)${w.bonoEntregado ? ' · bono de esta semana ya ganado' : ''}</div></div></div>
-          <div class="barra-progreso" style="margin-top:10px"><span style="width:${Math.min(100, pctSemana())}%"></span></div>
+      html: `<div class="tarjeta destacado">
+          <span class="etiqueta">A tiempo esta semana</span>
+          <p class="cifra-grande">${num(pctSemana())} <small>%</small></p>
+          ${barra(pctSemana(), 100)}
+          <p class="sub" style="margin-top:8px">${w.dentroDelTiempo} de ${w.total} dentro de ${SLA} min · meta ${C.leads.porcentajeSemanal} % (+${C.acciones.slaSemanal.puntos} pts)${w.bonoEntregado ? ' · bono ya ganado' : ''}</p>
         </div>
-        <div class="filtros">${['todos', 'urgente', 'pendiente', 'aldia', 'vendido'].map(k => `<button data-filtro="${k}" class="${filtro === k ? 'activo' : ''}">${k === 'todos' ? 'Todos' : NOMBRE_ESTADO[k]} (${k === 'todos' ? e.leads.length : cuenta(k)})</button>`).join('')}</div>
-        <div class="tarjeta" style="margin-top:10px">${lista.map(l => {
+        <div class="filtros">${['todos', 'urgente', 'pendiente', 'aldia', 'vendido'].map(k => `<button data-filtro="${k}" class="${filtro === k ? 'activo' : ''}">${k === 'todos' ? 'Todos' : NOMBRE_ESTADO[k]} <span>${k === 'todos' ? e.leads.length : cuenta(k)}</span></button>`).join('')}</div>
+        <div class="tarjeta lista">${lista.map(l => {
           const est = estadoLead(l);
-          return `<a class="fila" href="#lead/${l.id}"><div class="fila-cuerpo"><div class="fila-nombre">${esc(l.nombre)}</div><div class="fila-sub">${esc(l.ficha.vehiculo)} · ${esc(l.canal)} · ${haceCuanto(l)}</div><div class="fila-sub">${esc(l.atendido ? (l.vendido ? 'Venta registrada' : l.proximaAccion) : 'Hacer el primer contacto')}</div></div>
-            <div class="fila-lado"><span class="chip ${est === 'vendido' ? 'morado' : est}">${NOMBRE_ESTADO[est]}</span>${l.atendido ? '' : `<span class="reloj ${est}" data-reloj="${l.id}">${reloj(l)}</span>`}</div></a>`;
-        }).join('') || '<p class="muted">No hay leads en este estado.</p>'}</div>
-        <h2 class="titulo-seccion">Seguimientos de hoy</h2>
-        <div class="tarjeta">${segs.map(l => `<a class="fila" href="#acciones/${l.id}"><div class="fila-cuerpo"><div class="fila-nombre">${esc(l.seguimientoHoy)} · ${esc(l.nombre)}</div><div class="fila-sub">${esc(l.proximaAccion)}</div></div><span class="chip pendiente">+${C.acciones.seguimientoATiempo.puntos} a tiempo</span></a>`).join('') || '<p class="muted">No quedan seguimientos para hoy.</p>'}</div>
+          return `<a class="fila" href="#lead/${l.id}"><span class="fila-cuerpo"><strong>${esc(l.nombre)}</strong><span class="sub">${esc(l.ficha.vehiculo)} · ${esc(l.canal)} · ${haceCuanto(l)}</span><span class="sub">${esc(l.atendido ? (l.vendido ? 'Venta registrada' : l.proximaAccion) : 'Hacer el primer contacto')}</span></span>
+            <span class="fila-lado">${chipEstado(est)}${l.atendido ? '' : `<span class="reloj ${est}" data-reloj="${l.id}">${reloj(l)}</span>`}</span></a>`;
+        }).join('') || '<p class="vacio">No hay leads en este estado.</p>'}</div>
+        ${seccion('Seguimientos de hoy')}
+        <div class="tarjeta lista">${segs.map(l => `<a class="fila" href="#acciones/${l.id}"><span class="fila-cuerpo"><strong>${esc(l.seguimientoHoy)} · ${esc(l.nombre)}</strong><span class="sub">${esc(l.proximaAccion)}</span></span><span class="chip premio">+${C.acciones.seguimientoATiempo.puntos}</span></a>`).join('') || '<p class="vacio">No quedan seguimientos para hoy.</p>'}</div>
         <p class="nota">Si un lead pasa ${SLA} minutos sin gestión, se restan ${Math.abs(C.acciones.leadVencido.puntos)} puntos automáticamente.</p>`
     };
   }
@@ -386,32 +420,32 @@
     const l = lead(id); if (!l) return pNoExiste();
     const est = estadoLead(l), f = l.ficha;
     return {
-      barra: { titulo: 'Ficha del lead', sub: esc(l.canal), volver: '#leads' },
+      barra: { titulo: l.nombre, sub: `Cédula ${l.cedula} (ficticia) · ${l.canal}`, volver: '#leads' },
       pestana: 'leads',
-      html: `<div class="tarjeta" style="margin-top:14px">
-          <div class="ficha-cabecera"><div><div class="ficha-nombre">${esc(l.nombre)}</div><div class="muted pequeno">Cédula ${esc(l.cedula)} (ficticia) · ingresó ${haceCuanto(l)}</div></div><span class="chip ${est === 'vendido' ? 'morado' : est}">${NOMBRE_ESTADO[est]}</span></div>
-          <div style="margin-top:8px"><span class="chip sugar">Nombre y cédula vienen de Sugar</span></div>
-          ${l.atendido ? `<div class="proxima"><small>Próxima acción</small>${esc(l.vendido ? 'Venta registrada. Seguimiento posventa.' : l.proximaAccion)}</div>`
-            : `<div class="proxima" style="background:var(--rojo-suave)"><small style="color:var(--rojo)">Primer contacto pendiente</small><span data-reloj="${l.id}">${reloj(l)}</span> de ${SLA} min</div>
-               <button class="boton" style="margin-top:10px" data-accion="atender" data-id="${l.id}">Registrar primer contacto</button>`}
+      html: `<div class="tarjeta">
+          <div class="fila-tope">${chipEstado(est)}<span class="chip sugar">Nombre y cédula: Sugar</span></div>
+          ${l.atendido
+            ? `<span class="etiqueta" style="margin-top:14px">Próxima acción</span><p class="texto-fuerte">${esc(l.vendido ? 'Venta registrada. Seguimiento posventa.' : l.proximaAccion)}</p>`
+            : `<span class="etiqueta" style="margin-top:14px">Primer contacto</span><p class="cifra-grande rojo" data-reloj="${l.id}">${reloj(l)}</p><p class="sub">de ${SLA} minutos · ingresó ${haceCuanto(l)}</p>
+               <button class="boton" style="margin-top:14px" data-accion="atender" data-id="${l.id}">Registrar primer contacto</button>`}
         </div>
-        ${l.atendido && !l.vendido ? `<div class="accesos" style="margin-top:10px">
-          <a class="acceso" href="#acciones/${l.id}">${ICONO.lista}Acciones de venta</a>
-          <a class="acceso" href="#objecion/${l.id}">${ICONO.chat}Registrar objeción</a>
-          <a class="acceso" href="#cierre/${l.id}">${ICONO.regalo}Cierre y satisfacción</a>
+        ${l.atendido && !l.vendido ? `<div class="accesos">
+          <a href="#acciones/${l.id}">${ICONO.lista}<span>Acciones</span></a>
+          <a href="#objecion/${l.id}">${ICONO.chat}<span>Objeción</span></a>
+          <a href="#cierre/${l.id}">${ICONO.regalo}<span>Cierre</span></a>
         </div>` : ''}
-        <h2 class="titulo-seccion">Información comercial</h2>
-        <form class="tarjeta" id="form-ficha" data-id="${l.id}">
-          <div class="grid-campos">
-            <label class="campo ancho"><span>Vehículo de interés</span><input name="vehiculo" value="${esc(f.vehiculo)}"></label>
-            <label class="campo ancho"><span>Presupuesto aproximado (USD)</span><input name="presupuesto" value="${esc(f.presupuesto)}" placeholder="Ej.: 15.000 – 18.000"></label>
+        ${seccion('Información comercial')}
+        <form class="tarjeta formulario" id="form-ficha" data-id="${l.id}">
+          <label class="campo"><span>Vehículo de interés</span><input name="vehiculo" value="${esc(f.vehiculo)}"></label>
+          <label class="campo"><span>Presupuesto aproximado (USD)</span><input name="presupuesto" value="${esc(f.presupuesto)}" placeholder="Ej.: 15.000 – 18.000"></label>
+          <div class="dos-columnas">
             <label class="campo"><span>Uso previsto</span>${select('uso', f.uso)}</label>
             <label class="campo"><span>Para cuándo</span>${select('cuando', f.cuando)}</label>
             <label class="campo"><span>Forma de pago</span>${select('pago', f.pago)}</label>
             <label class="campo"><span>Auto en parte de pago</span>${select('partePago', f.partePago)}</label>
-            <label class="campo ancho"><span>Ocupación (para el financiamiento)</span><input name="ocupacion" value="${esc(f.ocupacion)}"></label>
           </div>
-          <button class="boton secundario" type="submit">Guardar información</button>
+          <label class="campo"><span>Ocupación (para el financiamiento)</span><input name="ocupacion" value="${esc(f.ocupacion)}"></label>
+          <button class="boton suave" type="submit">Guardar información</button>
         </form>`
     };
   }
@@ -419,25 +453,25 @@
   function pAcciones(id) {
     const l = lead(id); if (!l) return pNoExiste();
     const a = l.acciones;
-    const item = (hecho, texto, detalle, control) => `<div class="check ${hecho ? 'hecho' : ''}"><div class="check-caja">${hecho ? ICONO.check : ''}</div><div class="check-cuerpo"><div class="check-texto">${texto}</div>${detalle ? `<div class="check-detalle">${detalle}</div>` : ''}${control || ''}</div></div>`;
-    const opts = (nombre, lista, valor) => `<select data-campo="${nombre}" data-id="${l.id}"><option value="">Registrar resultado…</option>${lista.map(o => `<option ${o === valor ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    const item = (hecho, texto, detalle, control) => `<div class="check ${hecho ? 'hecho' : ''}"><span class="check-caja">${hecho ? ICONO.check : ''}</span><div class="check-cuerpo"><strong>${texto}</strong>${detalle ? `<span class="sub">${detalle}</span>` : ''}${control || ''}</div></div>`;
+    const opts = (nombre, lista, v) => `<select data-campo="${nombre}" data-id="${l.id}"><option value="">Registrar resultado…</option>${lista.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
     const ultimaObj = yo().objeciones.filter(o => o.lead === l.id).pop();
     return {
-      barra: { titulo: 'Acciones de venta', sub: esc(l.nombre), volver: `#lead/${l.id}` },
+      barra: { titulo: 'Acciones de venta', sub: l.nombre, volver: `#lead/${l.id}` },
       pestana: 'leads',
-      html: `${l.seguimientoHoy && !l.seguimientoHecho ? `<div class="tarjeta" style="margin-top:14px;border-left:4px solid var(--amarillo)">
-            <strong>Seguimiento de hoy, ${esc(l.seguimientoHoy)}</strong><div class="muted pequeno">${esc(l.proximaAccion)}</div>
-            <button class="boton" style="margin-top:10px" data-accion="seguimiento" data-id="${l.id}">Marcar seguimiento hecho (+${C.acciones.seguimientoATiempo.puntos})</button>
+      html: `${l.seguimientoHoy && !l.seguimientoHecho ? `<div class="tarjeta destacado">
+            <span class="etiqueta">Seguimiento de hoy · ${esc(l.seguimientoHoy)}</span><p class="texto-fuerte">${esc(l.proximaAccion)}</p>
+            <button class="boton" style="margin-top:12px" data-accion="seguimiento" data-id="${l.id}">Marcar como hecho · +${C.acciones.seguimientoATiempo.puntos}</button>
           </div>` : ''}
-        <h2 class="titulo-seccion">Checklist del cliente</h2>
-        <div class="tarjeta">
-          ${item(a.disponibilidad, 'Confirmar disponibilidad del vehículo', 'Antes de la cita, que el auto siga en esta agencia.', a.disponibilidad ? '' : `<button class="boton secundario" data-accion="disponibilidad" data-id="${l.id}">Confirmar que está disponible</button>`)}
-          ${item(a.cita, 'Resultado de la cita o test drive', a.cita ? esc(a.cita) : '', opts('cita', ['Asistió a la cita', 'Hizo test drive, le gustó', 'Hizo test drive, no le convenció', 'No asistió', 'Reagendó'], a.cita))}
-          ${item(a.proximo, 'Programar el siguiente seguimiento', a.proximo ? 'Programado: ' + esc(a.proximo.replace('T', ' a las ')) : '', `<input type="datetime-local" data-campo="proximo" data-id="${l.id}" value="${esc(a.proximo || '')}">`)}
-          ${item(a.cotizacion, 'Resultado de la cotización', a.cotizacion ? esc(a.cotizacion) : `Si no se hace el seguimiento a tiempo: ${C.acciones.cotizacionSinSeguimiento.puntos} pts.`, opts('cotizacion', ['Enviada, en espera', 'En negociación', 'Aceptada', 'Rechazada'], a.cotizacion))}
-          ${item(ultimaObj, 'Registrar la objeción principal', ultimaObj ? `${esc(D.objeciones[ultimaObj.tipo].nombre)} · ${ultimaObj.resuelta ? 'resuelta' : 'sin resolver'}` : '', `<a class="boton secundario" href="#objecion/${l.id}">${ultimaObj ? 'Registrar otra objeción' : 'Elegir objeción'}</a>`)}
+        ${seccion('Checklist del cliente')}
+        <div class="tarjeta lista">
+          ${item(a.disponibilidad, 'Confirmar disponibilidad del vehículo', 'Antes de la cita, que el auto siga en esta agencia.', a.disponibilidad ? '' : `<button class="boton suave chico" data-accion="disponibilidad" data-id="${l.id}">Confirmar que está disponible</button>`)}
+          ${item(a.cita, 'Resultado de la cita o test drive', '', opts('cita', ['Asistió a la cita', 'Hizo test drive, le gustó', 'Hizo test drive, no le convenció', 'No asistió', 'Reagendó'], a.cita))}
+          ${item(a.proximo, 'Programar el siguiente seguimiento', '', `<input type="datetime-local" data-campo="proximo" data-id="${l.id}" value="${esc(a.proximo || '')}">`)}
+          ${item(a.cotizacion, 'Resultado de la cotización', a.cotizacion ? '' : `Sin seguimiento a tiempo: ${C.acciones.cotizacionSinSeguimiento.puntos} pts.`, opts('cotizacion', ['Enviada, en espera', 'En negociación', 'Aceptada', 'Rechazada'], a.cotizacion))}
+          ${item(ultimaObj, 'Objeción principal', ultimaObj ? `${esc(D.objeciones[ultimaObj.tipo].nombre)} · ${ultimaObj.resuelta ? 'resuelta' : 'sin resolver'}` : '', `<a class="boton suave chico" href="#objecion/${l.id}">${ultimaObj ? 'Registrar otra' : 'Elegir objeción'}</a>`)}
         </div>
-        <div style="margin-top:14px"><a class="boton amarillo" href="#cierre/${l.id}">Cerrar venta: kit y satisfacción</a></div>
+        <a class="boton" style="margin-top:20px" href="#cierre/${l.id}">Cerrar venta</a>
         <p class="nota">El embudo completo sigue en Sugar; aquí solo van las acciones críticas.</p>`
     };
   }
@@ -445,10 +479,9 @@
   function pObjecion(id) {
     const l = lead(id); if (!l) return pNoExiste();
     return {
-      barra: { titulo: 'Registrar objeción', sub: esc(l.nombre), volver: `#acciones/${l.id}` },
+      barra: { titulo: 'Objeción principal', sub: l.nombre, volver: `#acciones/${l.id}` },
       pestana: 'leads',
-      html: `<h2 class="titulo-seccion">¿Cuál es la objeción principal?</h2>
-        ${Object.entries(D.objeciones).map(([k, o]) => `<a class="opcion" href="#guia/${l.id}/${k}"><span><strong>${esc(o.nombre)}</strong><small>${esc(o.resumen)}</small></span><span class="flecha">›</span></a>`).join('')}
+      html: `<div class="tarjeta lista">${Object.entries(D.objeciones).map(([k, o]) => `<a class="fila" href="#guia/${l.id}/${k}"><span class="fila-cuerpo"><strong>${esc(o.nombre)}</strong><span class="sub">${esc(o.resumen)}</span></span><span class="flecha">›</span></a>`).join('')}</div>
         <p class="nota">Al elegirla, la app muestra la guía de respuesta para esa objeción.</p>`
     };
   }
@@ -457,161 +490,225 @@
     const l = lead(id), o = D.objeciones[tipo]; if (!l || !o) return pNoExiste();
     const t = o.comparacion;
     return {
-      barra: { titulo: `Guía: ${o.nombre}`, sub: esc(l.nombre), volver: `#objecion/${l.id}` },
+      barra: { titulo: o.nombre, sub: `Guía de respuesta · ${l.nombre}`, volver: `#objecion/${l.id}` },
       pestana: 'leads',
-      html: `<div class="tarjeta" style="margin-top:14px"><strong>Qué explicar</strong><ol class="lista">${o.explicar.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>
-        <div class="tarjeta"><strong>Beneficios para destacar</strong><div class="beneficios">${o.beneficios.map(x => `<span>${esc(x)}</span>`).join('')}</div></div>
-        <div class="tarjeta"><strong>${esc(t.titulo)}</strong><table class="tabla"><thead><tr>${t.columnas.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${t.filas.map(f => `<tr>${f.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-        <h2 class="titulo-seccion">¿Se resolvió la objeción?</h2>
-        <div class="botones-2"><button class="boton" data-accion="objecion" data-id="${l.id}" data-tipo="${tipo}" data-resuelta="1">Sí, se resolvió</button><button class="boton secundario" data-accion="objecion" data-id="${l.id}" data-tipo="${tipo}" data-resuelta="0">Todavía no</button></div>
-        <p class="nota">Las objeciones sin resolver sirven para recomendarte un curso en Desarrollo.</p>`
+      html: `${seccion('Qué explicar')}<div class="tarjeta"><ol class="pasos">${o.explicar.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>
+        ${seccion('Beneficios para destacar')}<div class="beneficios">${o.beneficios.map(x => `<span>${esc(x)}</span>`).join('')}</div>
+        ${seccion(esc(t.titulo))}<div class="tarjeta"><table class="tabla"><thead><tr>${t.columnas.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${t.filas.map(f => `<tr>${f.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        ${seccion('¿Se resolvió?')}
+        <div class="botones-2"><button class="boton" data-accion="objecion" data-id="${l.id}" data-tipo="${tipo}" data-resuelta="1">Sí</button><button class="boton suave" data-accion="objecion" data-id="${l.id}" data-tipo="${tipo}" data-resuelta="0">Todavía no</button></div>
+        <p class="nota">Las objeciones sin resolver hacen que la app te sugiera un refuerzo en Mis capacitaciones.</p>`
     };
   }
 
   let cierre = { kit: null, carita: null };
   function pCierre(id) {
     const l = lead(id); if (!l) return pNoExiste();
-    if (l.vendido) return { barra: { titulo: 'Cierre', volver: `#lead/${l.id}` }, pestana: 'leads', html: `<div class="tarjeta" style="margin-top:14px">La venta a ${esc(l.nombre)} ya está registrada.</div>` };
+    if (l.vendido) return { barra: { titulo: 'Cierre', volver: `#lead/${l.id}` }, pestana: 'leads', html: `<div class="tarjeta"><p>La venta a ${esc(l.nombre)} ya está registrada.</p></div>` };
     const caras = [['excelente', 'Excelente', 'caritaExcelente'], ['buena', 'Buena', 'caritaBuena'], ['aceptable', 'Aceptable', 'caritaAceptable']];
     return {
-      barra: { titulo: 'Kit de cierre y satisfacción', sub: esc(l.nombre), volver: `#acciones/${l.id}` },
+      barra: { titulo: 'Cerrar venta', sub: l.nombre, volver: `#acciones/${l.id}` },
       pestana: 'leads',
-      html: `<h2 class="titulo-seccion">Artículo entregado al cliente</h2>
-        <div class="tarjeta"><div class="kit">${C.kitCierre.map(k => `<button data-kit="${esc(k)}" class="${cierre.kit === k ? 'activo' : ''}">${esc(k)}</button>`).join('')}</div>
-        <p class="nota" style="margin-bottom:0">Lo pone la empresa, no el asesor. El registro sirve para controlar consumo y costo.</p></div>
-        <h2 class="titulo-seccion">¿Cómo calificó el cliente la atención?</h2>
-        <div class="tarjeta"><div class="caritas">${caras.map(([k, n, acc]) => `<button data-carita="${acc}" class="${cierre.carita === acc ? 'activo' : ''}">${carita(k)}${n}<small>+${C.acciones[acc].puntos} pts</small></button>`).join('')}</div>
-        <p class="nota" style="margin-bottom:0">El cliente elige la carita en el celular del asesor al terminar.</p></div>
-        <div style="margin-top:14px"><button class="boton" data-accion="cerrar" data-id="${l.id}" ${cierre.kit && cierre.carita ? '' : 'disabled'}>Registrar venta y satisfacción</button></div>`
+      html: `${seccion('Obsequio entregado')}
+        <div class="kit">${C.kitCierre.map(k => `<button data-kit="${esc(k)}" class="${cierre.kit === k ? 'activo' : ''}">${esc(k)}</button>`).join('')}</div>
+        <p class="nota">Lo pone la empresa, no el asesor. El registro sirve para controlar consumo y costo.</p>
+        ${seccion('¿Cómo calificó el cliente la atención?')}
+        <div class="caritas">${caras.map(([k, n, acc]) => `<button data-carita="${acc}" class="${cierre.carita === acc ? 'activo' : ''}">${carita(k)}<strong>${n}</strong><small>+${C.acciones[acc].puntos} pts</small></button>`).join('')}</div>
+        <p class="nota">El cliente elige la carita en el celular del asesor al terminar.</p>
+        <button class="boton" style="margin-top:20px" data-accion="cerrar" data-id="${l.id}" ${cierre.kit && cierre.carita ? '' : 'disabled'}>Registrar venta</button>`
     };
   }
 
-  function pDesarrollo() {
-    const e = yo(), rec = recomendacion(), hechos = e.cursos.filter(c => c.estado === 'completado').length;
-    return {
-      barra: { titulo: 'Mi desarrollo', sub: 'Ruta de capacitación y coaching' },
-      pestana: 'desarrollo',
-      html: `${horasHTML()}
-        <div class="tarjeta"><div class="meta-ventas-fila"><span>Progreso de aprendizaje</span><strong>${hechos} de ${D.cursos.length} cursos</strong></div><div class="barra-progreso"><span style="width:${hechos / D.cursos.length * 100}%"></span></div></div>
-        ${rec ? `<a class="tarjeta recomendado" href="#curso/${rec.curso.id}" style="display:block"><small>Recomendado para ti</small><strong>${esc(rec.curso.nombre)}</strong><div class="muted pequeno">${esc(rec.motivo)}</div></a>` : ''}
-        <h2 class="titulo-seccion">Ruta de capacitación</h2>
-        <div class="tarjeta">${D.cursos.map((c, i) => {
-          const ec = estadoCurso(c.id), cls = ec.estado === 'completado' ? 'completado' : ec.estado === 'en curso' ? 'encurso' : '';
-          const sub = ec.estado === 'completado' ? `Nota ${ec.notaFinal} %${ec.notaInicial ? ` (antes ${ec.notaInicial} %)` : ''} · ${c.horas} h` : `${c.horas} h · ${c.vence}`;
-          return `<a class="curso" href="#curso/${c.id}"><div class="curso-num ${cls}">${ec.estado === 'completado' ? '✓' : i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(c.nombre)}</div><div class="fila-sub">${sub}</div></div><span class="chip ${ec.estado === 'completado' ? 'morado' : ec.estado === 'en curso' ? 'pendiente' : 'gris'}">${ec.estado === 'completado' ? 'Completado' : ec.estado === 'en curso' ? 'En curso' : 'Pendiente'}</span></a>`;
-        }).join('')}</div>
-        <p class="nota">Nota de 90 a 100 %: +7 · de 80 a 89 %: +5 · de 70 a 79 %: +3 · vencido sin completar: −2. Además, +${C.acciones.horasCapacitacion.puntos} por cada hora.</p>
-        ${impactoHTML()}
-        <h2 class="titulo-seccion">Coaching con el jefe de agencia</h2>
-        <div class="tarjeta">${e.coaching.map(c => `<div class="mov"><div><strong>${esc(c.brecha)}</strong><small>${esc(c.fecha)} · ${esc(c.jefe)}</small><small style="color:var(--texto)">Acción acordada: ${esc(c.accion)}</small></div></div>`).join('')}</div>
-        <form class="tarjeta" id="form-coaching">
-          <strong>Registrar sesión de coaching</strong>
-          <label class="campo" style="margin-top:10px"><span>Brecha detectada</span><select name="brecha" required><option value="">Elegir…</option>${['Tiempo de respuesta a leads', 'Seguimiento de cotizaciones', 'Objeciones de precio', 'Objeciones de Marketplace', 'Financiamiento', 'Cierre de la venta'].map(b => `<option>${b}</option>`).join('')}</select></label>
-          <label class="campo"><span>Acción de mejora acordada</span><textarea name="accion" required placeholder="Ej.: practicar la guía de precio en un role play"></textarea></label>
-          <label class="campo"><span>Duración</span><select name="horas">${[0.5, 1, 1.5, 2].map(h => `<option value="${h}" ${h === 1 ? 'selected' : ''}>${String(h).replace('.', ',')} h</option>`).join('')}</select></label>
-          <button class="boton secundario" type="submit">Guardar sesión</button>
-        </form>
-        <h2 class="titulo-seccion">Registro de horas de ${new Date().getFullYear()}</h2>
-        <div class="tarjeta">${e.horas.slice().reverse().map(h => `<div class="mov"><div>${esc(h.actividad)}<small>${esc(h.fecha)} · ${esc(h.tipo)}</small></div><span class="mov-puntos">${String(h.horas).replace('.', ',')} h</span></div>`).join('')}</div>`
-    };
+  // ---------- Mis capacitaciones ----------
+  function dona(v, meta, etiqueta) {
+    const p = Math.min(100, v / meta * 100);
+    return `<svg viewBox="0 0 36 36" class="dona" role="img" aria-label="${Math.round(p)} %"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--pista)" stroke-width="3"/><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--morado)" stroke-width="3" stroke-dasharray="${p} ${100 - p}" stroke-dashoffset="25" stroke-linecap="round"/><text x="18" y="18.6" text-anchor="middle" class="dona-cifra">${Math.round(p)}%</text><text x="18" y="23.4" text-anchor="middle" class="dona-label">${etiqueta}</text></svg>`;
   }
-
-  function dona(valor, meta) {
-    const pct = Math.min(100, valor / meta * 100);
-    return `<svg viewBox="0 0 36 36" class="dona" role="img" aria-label="${Math.round(pct)} % de la meta"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--morado-suave)" stroke-width="3.4"/><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--morado)" stroke-width="3.4" stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="25" stroke-linecap="round"/><text x="18" y="18.2" text-anchor="middle" class="dona-cifra">${Math.round(pct)}%</text><text x="18" y="23.2" text-anchor="middle" class="dona-label">de la meta</text></svg>`;
-  }
-  function horasHTML() {
-    const h = horasDe(s.usuario), meta = C.capacitacion.metaHorasAnio, esperado = horasEsperadas();
-    const diferencia = h - esperado;
-    return `<div class="tarjeta horas" style="margin-top:14px">${dona(h, meta)}
-      <div class="horas-cuerpo"><span class="juego-label">Horas de capacitación ${new Date().getFullYear()}</span>
-        <span class="horas-cifra">${String(h).replace('.', ',')} <small>de ${meta} h</small></span>
-        <span class="pequeno">Ritmo esperado a hoy: ${esperado} h · <strong style="color:${diferencia < 0 ? 'var(--rojo)' : 'var(--verde)'}">${diferencia < 0 ? `vas ${Math.abs(diferencia)} h atrás` : 'vas al día'}</strong></span>
-        <span class="muted pequeno">Este mes: ${String(horasDelMes()).replace('.', ',')} h · +${C.acciones.horasCapacitacion.puntos} punto por hora</span></div></div>`;
+  // Horas por mes: barras con la línea de la meta mensual.
+  function barrasMes() {
+    const W = 320, H = 120, izq = 6, der = 6, arr = 10, aba = 18, maxH = HPM + 2;
+    const ancho = (W - izq - der) / 12, y = v => arr + (H - arr - aba) * (1 - v / maxH);
+    return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="Horas de capacitación por mes">
+      <line x1="${izq}" x2="${W - der}" y1="${y(HPM)}" y2="${y(HPM)}" class="g-meta"/><text x="${W - der}" y="${y(HPM) - 4}" text-anchor="end" class="g-texto">${HPM} h</text>
+      ${D.capacitaciones.map((_, i) => {
+        const c = capDe(i), x = izq + ancho * i + ancho * 0.22, w = ancho * 0.56, v = c.horas;
+        const cls = c.estado === 'incompleta' ? 'g-barra mal' : i === mesActual ? 'g-barra actual' : 'g-barra';
+        return `${v ? `<rect x="${x}" y="${y(v)}" width="${w}" height="${y(0) - y(v)}" rx="3" class="${cls}"/>` : `<rect x="${x}" y="${y(0) - 2}" width="${w}" height="2" rx="1" class="g-barra vacia"/>`}<text x="${x + w / 2}" y="${H - 4}" text-anchor="middle" class="g-texto ${i === mesActual ? 'fuerte' : ''}">${MES_CORTO[i][0]}</text>`;
+      }).join('')}
+    </svg>`;
   }
 
   // Antes y después de cada capacitación, con los números mensuales del asesor.
   let indicador = 'conversion';
   const prom = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
-  const num = (n, u) => n == null ? '—' : n.toLocaleString('es-EC', { maximumFractionDigits: 1 }) + (u ? ' ' + u : '');
   function antesDespues(ind, mes) {
     const v = D.impacto.indicadores[ind].valores;
     return [prom(v.slice(Math.max(0, mes - 2), mes)), prom(v.slice(mes + 1, mes + 3))];
   }
   function grafico() {
-    const I = D.impacto, ind = I.indicadores[indicador], v = ind.valores;
-    const W = 320, H = 150, izq = 30, der = 10, arr = 18, aba = 22;
+    const Im = D.impacto, ind = Im.indicadores[indicador], v = ind.valores;
+    const W = 320, H = 140, izq = 30, der = 10, arr = 20, aba = 20;
     const min = Math.min(...v), max = Math.max(...v), r = (max - min) || 1, lo = min - r * 0.2, hi = max + r * 0.2;
     const x = i => izq + (W - izq - der) * i / (v.length - 1), y = n => arr + (H - arr - aba) * (1 - (n - lo) / (hi - lo));
-    const marcas = I.capacitaciones.map((c, k) => `<line x1="${x(c.mes)}" x2="${x(c.mes)}" y1="${arr - 4}" y2="${H - aba}" class="g-marca"/><circle cx="${x(c.mes)}" cy="${arr - 8}" r="7" class="g-marca-punto"/><text x="${x(c.mes)}" y="${arr - 5}" text-anchor="middle" class="g-marca-num">${k + 1}</text>`).join('');
+    const marcas = Im.marcas.map((m, k) => `<line x1="${x(m)}" x2="${x(m)}" y1="${arr - 6}" y2="${H - aba}" class="g-marca"/><circle cx="${x(m)}" cy="${arr - 10}" r="7" class="g-marca-punto"/><text x="${x(m)}" y="${arr - 7}" text-anchor="middle" class="g-marca-num">${k + 1}</text>`).join('');
     const linea = v.map((n, i) => `${i ? 'L' : 'M'}${x(i)},${y(n)}`).join(' ');
     return `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="${esc(ind.nombre)} por mes">
-      <line x1="${izq}" x2="${W - der}" y1="${H - aba}" y2="${H - aba}" class="g-eje"/>
       <text x="${izq - 6}" y="${y(max) + 3}" text-anchor="end" class="g-texto">${num(max)}</text><text x="${izq - 6}" y="${y(min) + 3}" text-anchor="end" class="g-texto">${num(min)}</text>
-      ${marcas}<path d="${linea}" class="g-linea"/>${v.map((n, i) => `<circle cx="${x(i)}" cy="${y(n)}" r="2.6" class="g-punto"/>`).join('')}
-      ${I.meses.map((m, i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" class="g-texto">${m}</text>`).join('')}
+      ${marcas}<path d="${linea}" class="g-linea"/>${v.map((n, i) => `<circle cx="${x(i)}" cy="${y(n)}" r="2.5" class="g-punto"/>`).join('')}
+      ${Im.meses.map((m, i) => `<text x="${x(i)}" y="${H - 4}" text-anchor="middle" class="g-texto">${m[0]}</text>`).join('')}
     </svg>`;
   }
   function impactoHTML() {
-    const I = D.impacto;
-    return `<h2 class="titulo-seccion">Antes y después de capacitarte</h2>
+    const Im = D.impacto;
+    return `${seccion('Antes y después')}
       <div class="tarjeta">
-        <div class="segmentos">${Object.entries(I.indicadores).map(([k, ind]) => `<button data-indicador="${k}" class="${k === indicador ? 'activo' : ''}">${esc(ind.nombre)}</button>`).join('')}</div>
+        <div class="segmentos">${Object.entries(Im.indicadores).map(([k, ind]) => `<button data-indicador="${k}" class="${k === indicador ? 'activo' : ''}">${esc(ind.nombre)}</button>`).join('')}</div>
         ${grafico()}
-        <p class="muted pequeno">Cada número marca el mes de una capacitación. Antes: promedio de los 2 meses previos. Después: de los 2 siguientes.</p>
+        <p class="sub">Cada número marca el mes de una capacitación. Antes: promedio de los 2 meses previos; después: de los 2 siguientes.</p>
       </div>
-      ${I.capacitaciones.map((c, k) => `<div class="tarjeta impacto"><div class="meta-ventas-fila"><span><span class="g-num">${k + 1}</span><strong>${esc(c.nombre)}</strong></span><span class="muted pequeno">${I.meses[c.mes]} · ${c.horas} h</span></div>
-        <table class="tabla"><thead><tr><th></th><th>Antes</th><th>Después</th></tr></thead><tbody>${Object.entries(I.indicadores).map(([kk, ind]) => {
-          const [a, d] = antesDespues(kk, c.mes), dif = d - a;
-          return `<tr><td>${esc(ind.nombre)}</td><td>${num(a, ind.unidad)}</td><td>${num(d, ind.unidad)} <span class="${dif >= 0 ? 'sube' : 'baja'}">${dif >= 0 ? '▲' : '▼'} ${num(Math.abs(dif))}</span></td></tr>`;
-        }).join('')}</tbody></table></div>`).join('')}`;
+      ${Im.marcas.map((m, k) => {
+        const c = capDe(m);
+        return `<a class="tarjeta impacto" href="#capacitacion/${m}"><div class="fila-tope"><span class="texto-fuerte"><span class="g-num">${k + 1}</span>${esc(D.capacitaciones[m].nombre)}</span><span class="sub">${MES_CORTO[m]}</span></div>
+          <table class="tabla"><thead><tr><th></th><th>Antes</th><th>Después</th></tr></thead><tbody>
+          <tr><td>Nota de la evaluación</td><td>${c.notaInicial}</td><td>${c.notaFinal} <span class="sube">▲ ${c.notaFinal - c.notaInicial}</span></td></tr>
+          ${Object.entries(Im.indicadores).map(([kk, ind]) => {
+            const [a, d] = antesDespues(kk, m), dif = d - a;
+            return `<tr><td>${esc(ind.nombre)}</td><td>${num(a, ind.unidad)}</td><td>${num(d, ind.unidad)} <span class="${dif >= 0 ? 'sube' : 'baja'}">${dif >= 0 ? '▲' : '▼'} ${num(Math.abs(dif))}</span></td></tr>`;
+          }).join('')}</tbody></table></a>`;
+      }).join('')}`;
   }
 
-  function preguntasHTML(c, revisar) {
-    return c.preguntas.map(([texto, ops, ok], i) => `<div class="pregunta"><p>${i + 1}. ${esc(texto)}</p>${ops.map((o, j) => {
+  const ETIQUETA_CAP = { completada: ['Completada', 'aldia'], incompleta: ['Incompleta', 'urgente'], encurso: ['En curso', 'pendiente'], pendiente: ['Pendiente', 'gris'] };
+  function filaCapacitacion(i) {
+    const c = capDe(i), pts = puntosDeMes(i);
+    const lado = c.estado === 'completada' ? `<span class="nota-cap">${c.notaFinal}</span><span class="sub">${pts ? signo(pts) + ' pts' : 'sin puntos'}</span>`
+      : c.estado === 'incompleta' ? `<span class="chip urgente">${h(c.horas)} de ${HPM}</span><span class="sub rojo">${signo(pts)} pts</span>`
+      : c.estado === 'encurso' ? `<span class="chip pendiente">${h(c.horas)} de ${HPM}</span>`
+      : '<span class="sub">—</span>';
+    return `<a class="fila ${i === mesActual ? 'actual' : ''}" href="#capacitacion/${i}"><span class="mes ${c.estado}">${MES_CORTO[i]}</span><span class="fila-cuerpo"><strong>${esc(D.capacitaciones[i].nombre)}</strong><span class="sub">${ETIQUETA_CAP[c.estado][0]}</span></span><span class="fila-lado">${lado}</span></a>`;
+  }
+
+  function pCapacitaciones() {
+    const e = yo(), d = D.capacitaciones[mesActual], hm = horasMes(), falta = faltanHoras(), anio = horasDe(s.usuario), ref = refuerzo();
+    const cap = capDe(mesActual), esperado = horasEsperadas(), dif = anio - esperado;
+    const reglas = C.capacitacion.notas.map((t, k) => `${t.desde}${k === 0 ? ' a 100' : ` a ${C.capacitacion.notas[k - 1].desde - 1}`}: ${signo(C.acciones[t.accion].puntos)}`).join(' · ');
+    return {
+      barra: { titulo: 'Mis capacitaciones', sub: `Una al mes · ${HPM} h cada una` },
+      pestana: 'capacitaciones',
+      html: `<div class="tarjeta destacado">
+          <span class="etiqueta">Capacitación de ${MESES[mesActual]}</span>
+          <p class="texto-fuerte">${esc(d.nombre)}</p>
+          <p class="cifra-grande">${num(hm)} <small>de ${HPM} h</small></p>
+          ${barra(hm, HPM)}
+          <p class="sub" style="margin-top:8px">${cap.estado === 'completada' ? `Completada con ${cap.notaFinal}.` : falta > 0 ? `<strong class="texto-morado">Te faltan ${h(falta)} para tu meta del mes</strong> · quedan ${diasRestantes()} días` : '<strong class="texto-morado">Meta de horas cumplida.</strong> Ya puedes dar la evaluación final.'}</p>
+          <div class="botones-2" style="margin-top:16px">
+            ${cap.estado === 'encurso' && falta === 0
+              ? `<a class="boton" href="#capacitacion/${mesActual}/evaluacion">Evaluación final</a><a class="boton suave" href="#registrar-horas">Registrar horas</a>`
+              : `<a class="boton" href="${cap.estado === 'completada' ? `#capacitacion/${mesActual}` : '#registrar-horas'}">${cap.estado === 'completada' ? 'Ver resultado' : 'Registrar horas'}</a><a class="boton suave" href="#capacitacion/${mesActual}">Abrir</a>`}
+          </div>
+        </div>
+        ${seccion('Tu año')}
+        <div class="tarjeta anio">${dona(anio, META_ANIO, 'del año')}
+          <div class="anio-cuerpo"><p class="cifra-grande">${anio} <small>de ${META_ANIO} h</small></p>
+            <p class="sub">Ritmo esperado a hoy: ${esperado} h · <strong class="${dif < 0 ? 'rojo' : 'verde'}">${dif < 0 ? `${Math.abs(dif)} h atrás` : 'al día'}</strong></p>
+            <p class="sub">KPI de la tesis: ${C.capacitacion.kpiHorasAnio} h al año.</p></div>
+        </div>
+        <div class="tarjeta">${barrasMes()}<p class="sub">Horas por mes. La línea marca la meta de ${HPM} h; en rojo, un mes sin completar.</p></div>
+        ${seccion('Plan del año')}
+        <div class="tarjeta lista">${D.capacitaciones.map((_, i) => filaCapacitacion(i)).join('')}</div>
+        <p class="nota">Nota de ${reglas} · sin completar las ${HPM} h del mes: ${signo(C.acciones.capacitacionIncompleta.puntos)}.</p>
+        ${ref ? `<a class="tarjeta refuerzo" href="#capacitacion/${ref.i}"><span class="etiqueta">Refuerzo sugerido</span><p class="texto-fuerte">Repasa «${esc(D.capacitaciones[ref.i].nombre)}»</p><p class="sub">${esc(ref.motivo)}</p></a>` : ''}
+        ${impactoHTML()}
+        ${seccion('Registro de horas de ' + MESES[mesActual], '<a href="#registrar-horas">Registrar</a>')}
+        <div class="tarjeta lista">${e.cap.sesiones.slice().reverse().map(x => `<div class="fila"><span class="fila-cuerpo"><strong>${esc(x.actividad)}</strong><span class="sub">${esc(x.fecha)}</span></span><span class="texto-fuerte">${h(x.horas)}</span></div>`).join('') || '<p class="vacio">Todavía no registras horas este mes.</p>'}</div>
+        ${seccion('Coaching con el jefe de agencia')}
+        <div class="tarjeta lista">${e.coaching.map(c => `<div class="fila"><span class="fila-cuerpo"><strong>${esc(c.brecha)}</strong><span class="sub">${esc(c.fecha)} · ${esc(c.jefe)}</span><span class="sub texto">Acción acordada: ${esc(c.accion)}</span></span></div>`).join('')}</div>
+        <form class="tarjeta formulario" id="form-coaching">
+          <p class="texto-fuerte">Registrar sesión de coaching</p>
+          <label class="campo"><span>Brecha detectada</span><select name="brecha" required><option value="">Elegir…</option>${['Tiempo de respuesta a leads', 'Seguimiento de cotizaciones', 'Objeciones de precio', 'Objeciones de Marketplace', 'Financiamiento', 'Cierre de la venta'].map(b => `<option>${b}</option>`).join('')}</select></label>
+          <label class="campo"><span>Acción de mejora acordada</span><textarea name="accion" required placeholder="Ej.: practicar la guía de precio en un role play"></textarea></label>
+          <button class="boton suave" type="submit">Guardar sesión</button>
+        </form>`
+    };
+  }
+
+  function pRegistrarHoras() {
+    const hm = horasMes(), falta = faltanHoras(), hoyISO = `${hoy.getFullYear()}-${dos(mesActual + 1)}-${dos(hoy.getDate())}`;
+    return {
+      barra: { titulo: 'Registrar horas', sub: D.capacitaciones[mesActual].nombre, volver: '#capacitaciones' },
+      pestana: 'capacitaciones',
+      html: `<div class="tarjeta destacado"><span class="etiqueta">Este mes</span><p class="cifra-grande">${num(hm)} <small>de ${HPM} h</small></p>${barra(hm, HPM)}
+          <p class="sub" style="margin-top:8px">${falta > 0 ? `Te faltan ${h(falta)}.` : 'Ya completaste las horas del mes.'}</p></div>
+        <form class="tarjeta formulario" id="form-horas">
+          <label class="campo"><span>¿Qué hiciste?</span><select name="actividad">${C.capacitacion.actividades.map(a => `<option>${a}</option>`).join('')}</select></label>
+          <div class="dos-columnas">
+            <label class="campo"><span>Horas</span><select name="horas">${[0.5, 1, 1.5, 2, 3, 4].map(x => `<option value="${x}" ${x === Math.min(2, falta || 2) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select></label>
+            <label class="campo"><span>Fecha</span><input type="date" name="fecha" value="${hoyISO}" min="${hoy.getFullYear()}-${dos(mesActual + 1)}-01" max="${hoyISO}"></label>
+          </div>
+          <button class="boton" type="submit">Guardar horas</button>
+        </form>
+        <p class="nota">Si al ${diasDelMes} de ${MESES[mesActual]} no llegas a ${HPM} h, se restan ${Math.abs(C.acciones.capacitacionIncompleta.puntos)} puntos.</p>`
+    };
+  }
+
+  function preguntasHTML(d, revisar) {
+    return d.preguntas.map(([texto, ops, ok], i) => `<div class="pregunta"><p class="texto-fuerte">${i + 1}. ${esc(texto)}</p>${ops.map((o, j) => {
       const marca = revisar ? (j === ok ? 'correcta' : revisar[i] === j ? 'incorrecta' : '') : '';
       return `<label class="${marca}"><input type="radio" name="p${i}" value="${j}" ${revisar ? 'disabled' : ''} ${revisar && revisar[i] === j ? 'checked' : ''} required>${esc(o)}</label>`;
     }).join('')}</div>`).join('');
   }
 
   let ultimoResultado = null;
-  function pCurso(id, paso) {
-    const c = curso(id); if (!c) return pNoExiste();
-    const ec = estadoCurso(id), base = { barra: { titulo: c.nombre, sub: `Curso · ${c.horas} h de capacitación`, volver: '#desarrollo' }, pestana: 'desarrollo' };
-    if (paso === 'inicial' || paso === 'evaluacion') {
+  function pCapacitacion(idx, paso) {
+    const i = Number(idx), d = D.capacitaciones[i]; if (!d) return pNoExiste();
+    const c = capDe(i), actual = i === mesActual, pts = puntosDeMes(i);
+    const base = { barra: { titulo: d.nombre, sub: `${MESES[i][0].toUpperCase() + MESES[i].slice(1)} · ${HPM} h`, volver: '#capacitaciones' }, pestana: 'capacitaciones' };
+    if (actual && (paso === 'inicial' || paso === 'evaluacion')) {
       const inicial = paso === 'inicial';
       return Object.assign(base, {
-        html: `<div class="tarjeta" style="margin-top:14px"><strong>${inicial ? 'Evaluación inicial' : 'Evaluación final'}</strong><div class="muted pequeno">${inicial ? 'Antes de empezar, para medir el avance. No da puntos.' : `${c.preguntas.length} preguntas. Con 70 % o más el curso queda aprobado.`}</div></div>
-          <form class="tarjeta" id="form-evaluacion" data-id="${id}" data-tipo="${paso}">${preguntasHTML(c)}<button class="boton" type="submit">${inicial ? 'Guardar y ver el curso' : 'Enviar evaluación'}</button></form>`
+        html: `<div class="tarjeta"><p class="texto-fuerte">${inicial ? 'Evaluación inicial' : 'Evaluación final'}</p><p class="sub">${inicial ? 'Antes de empezar, para medir tu avance. No da puntos.' : `Nota de 95 a 100: +4 · de 91 a 94: +2.`}</p></div>
+          <form class="tarjeta formulario" id="form-evaluacion" data-i="${i}" data-tipo="${paso}">${preguntasHTML(d)}<button class="boton" type="submit">${inicial ? 'Guardar' : 'Enviar evaluación'}</button></form>`
       });
     }
-    if (paso === 'resultado' && ultimoResultado && ultimoResultado.id === id) {
-      const r = ultimoResultado, rec = recomendacion();
+    if (actual && paso === 'resultado' && ultimoResultado && ultimoResultado.i === i) {
+      const r = ultimoResultado;
       return Object.assign(base, {
-        html: `<div class="tarjeta resultado" style="margin-top:14px">
-            <div class="muted pequeno">Tu nota</div><div class="resultado-nota">${r.nota} %</div>
-            <div style="margin-top:4px">${r.accion ? `<span class="chip aldia">${signo(C.acciones[r.accion].puntos)} puntos · ${esc(C.acciones[r.accion].motivo)}</span><br><span class="chip morado" style="margin-top:6px">${c.horas} h de capacitación · ${signo(c.horas * C.acciones.horasCapacitacion.puntos)} puntos</span>` : '<span class="chip urgente">No aprobado: puedes repetirla</span>'}</div>
-            <div class="antes-despues"><div><span class="muted pequeno">Antes</span><strong>${ec.notaInicial} %</strong></div><div><span class="muted pequeno">Después</span><strong>${r.nota} %</strong></div></div>
+        html: `<div class="tarjeta resultado"><span class="etiqueta">Tu nota</span><p class="resultado-nota">${r.nota}</p>
+            ${r.accion ? `<span class="chip aldia">${signo(C.acciones[r.accion].puntos)} puntos</span>` : '<span class="chip gris">Sin puntos: se suman desde 91</span>'}
+            <div class="antes-despues"><div><span class="sub">Antes</span><strong>${c.notaInicial}</strong></div><div><span class="sub">Después</span><strong>${r.nota}</strong></div><div><span class="sub">Mejora</span><strong class="verde">${signo(r.nota - c.notaInicial)}</strong></div></div>
           </div>
-          <h2 class="titulo-seccion">Tus respuestas</h2>
-          <div class="tarjeta">${preguntasHTML(c, r.respuestas)}</div>
-          ${rec ? `<a class="tarjeta recomendado" href="#curso/${rec.curso.id}" style="display:block"><small>Siguiente capacitación recomendada</small><strong>${esc(rec.curso.nombre)}</strong><div class="muted pequeno">${esc(rec.motivo)}</div></a>` : ''}
-          <div style="margin-top:14px">${r.accion ? '<a class="boton" href="#desarrollo">Volver a mi desarrollo</a>' : `<a class="boton" href="#curso/${id}/evaluacion">Repetir evaluación</a>`}</div>`
+          ${seccion('Tus respuestas')}<div class="tarjeta formulario">${preguntasHTML(d, r.respuestas)}</div>
+          <a class="boton" style="margin-top:20px" href="#capacitaciones">Volver a Mis capacitaciones</a>`
       });
     }
-    const completado = ec.estado === 'completado';
+    let estado;
+    if (c.estado === 'pendiente') {
+      estado = `<div class="tarjeta"><span class="chip gris">Pendiente</span><p class="sub" style="margin-top:10px">Se habilita el 1 de ${MESES[i]}. Son ${HPM} horas y una evaluación al final.</p></div>`;
+    } else if (!actual) {
+      estado = `<div class="tarjeta"><div class="fila-tope"><span class="chip ${ETIQUETA_CAP[c.estado][1]}">${ETIQUETA_CAP[c.estado][0]}</span><span class="sub">${h(c.horas)} de ${HPM}</span></div>
+          ${c.estado === 'completada'
+            ? `<div class="antes-despues"><div><span class="sub">Antes</span><strong>${c.notaInicial}</strong></div><div><span class="sub">Después</span><strong>${c.notaFinal}</strong></div><div><span class="sub">Puntos</span><strong class="${pts ? 'verde' : ''}">${pts ? signo(pts) : '0'}</strong></div></div>`
+            : `<p class="sub" style="margin-top:10px">No completó las ${HPM} horas del mes: <strong class="rojo">${signo(pts)} puntos</strong> ese mes.</p>`}</div>`;
+    } else {
+      const falta = faltanHoras();
+      let accion;
+      if (!c.notaInicial) accion = `<a class="boton" href="#capacitacion/${i}/inicial">Dar evaluación inicial</a>`;
+      else if (c.estado === 'completada') accion = `<div class="antes-despues"><div><span class="sub">Antes</span><strong>${c.notaInicial}</strong></div><div><span class="sub">Después</span><strong>${c.notaFinal}</strong></div><div><span class="sub">Puntos</span><strong class="${pts ? 'verde' : ''}">${pts ? signo(pts) : '0'}</strong></div></div>`;
+      else if (falta > 0) accion = `<a class="boton" href="#registrar-horas">Registrar horas</a><button class="boton suave" disabled>Evaluación final · faltan ${h(falta)}</button>`;
+      else accion = `<a class="boton" href="#capacitacion/${i}/evaluacion">Dar evaluación final</a>`;
+      estado = `<div class="tarjeta destacado"><span class="etiqueta">Horas de este mes</span><p class="cifra-grande">${num(c.horas)} <small>de ${HPM} h</small></p>${barra(c.horas, HPM)}
+          <p class="sub" style="margin:8px 0 16px">Evaluación inicial: ${c.notaInicial || '—'} · la final se habilita al completar las ${HPM} h.</p>${accion}</div>`;
+    }
     return Object.assign(base, {
-      html: `<div class="tarjeta" style="margin-top:14px"><div class="ficha-cabecera"><div><strong>${completado ? 'Curso completado' : esc(c.vence)}</strong><div class="muted pequeno">${ec.notaInicial ? `Evaluación inicial: ${ec.notaInicial} %` : 'Sin evaluación inicial todavía'}${completado ? ` · final: ${ec.notaFinal} %` : ''}</div></div><span class="chip ${completado ? 'morado' : 'pendiente'}">${completado ? 'Completado' : 'En curso'}</span></div></div>
-        ${!ec.notaInicial && !completado ? `<div class="tarjeta recomendado"><small>Antes de empezar</small><strong>Haz la evaluación inicial</strong><div class="muted pequeno">Así se ve cuánto mejoraste al final. No da puntos.</div><a class="boton" style="margin-top:10px" href="#curso/${id}/inicial">Empezar evaluación inicial</a></div>` : `
-        <h2 class="titulo-seccion">Contenido</h2>
-        <div class="tarjeta">${c.contenido.map(([t, x], i) => `<div class="leccion"><div class="leccion-num">${i + 1}</div><div><strong>${esc(t)}</strong><div class="muted pequeno">${esc(x)}</div></div></div>`).join('')}</div>
-        ${completado ? '' : `<div style="margin-top:14px"><a class="boton" href="#curso/${id}/evaluacion">Ir a la evaluación final</a></div>`}`}`
+      html: `${estado}
+        ${seccion('Contenido')}
+        <div class="tarjeta lista">${d.contenido.map(([t, x], k) => `<div class="fila arriba"><span class="leccion-num">${k + 1}</span><span class="fila-cuerpo"><strong>${esc(t)}</strong><span class="sub texto">${esc(x)}</span></span></div>`).join('')}</div>`
     });
   }
 
   function componentes(hist) {
     const r = {}; Object.keys(C.componentes).forEach(k => { r[k] = 0; });
-    hist.forEach(h => { r[C.acciones[h.accion].componente] += valor(h); });
+    hist.forEach(x => { r[C.acciones[x.accion].componente] += valor(x); });
     return r;
   }
 
@@ -619,26 +716,27 @@
     const e = yo(), p = puntosDe(e.historial), ventas = ventasDe(e.historial), comp = componentes(e.historial);
     const faltan = C.carro.puntosMeta - p;
     return {
-      barra: { titulo: 'Mi progreso', sub: nombreMes() },
+      barra: { titulo: 'Mi progreso', sub: `${MESES[mesActual]} de ${hoy.getFullYear()}` },
       pestana: 'progreso',
-      html: `<div class="tarjeta" style="margin-top:14px">
-          <div class="cifras" style="margin-top:0;padding-top:0;border-top:0">
-            <div><span class="cifra">${p}</span><span class="cifra-label">Puntos</span></div>
-            <div><span class="cifra">${posicion(s.usuario)}.º</span><span class="cifra-label">Ranking</span></div>
-            <div><span class="cifra">${ventas}/${C.metaVentasMes}</span><span class="cifra-label">Ventas</span></div>
+      html: `<section class="hero compacto">
+          <p class="hero-label">Puntos del mes</p>
+          <p class="hero-cifra">${p}</p>
+          <p class="hero-sub">${faltan > 0 ? `Te faltan ${faltan} para la meta del carro` : 'Llegaste a la meta del carro'} · ${posicion(s.usuario)}.º en el ranking</p>
+          ${pistaHTML(p)}
+          <div class="kpis">
+            <div><strong>${ventas}<small>/${C.metaVentasMes}</small></strong><span>Ventas</span></div>
+            <div><strong>${horasDe(s.usuario)}<small> h</small></strong><span>Capacitación del año</span></div>
+            <a href="#logros"><strong>${e.insignias.length}<small>/${C.insignias.length}</small></strong><span>Insignias</span></a>
           </div>
-          ${pistaHTML(p, true)}
-          <p class="muted pequeno" style="text-align:center">${faltan > 0 ? `Te faltan ${faltan} puntos para la meta del carro.` : 'Llegaste a la meta del carro este mes.'} Empezaste el mes con ${C.puntosInicioMes}.</p>
-        </div>
-        <a class="tarjeta fila-enlace" href="#logros"><span><strong>Mis logros</strong><span class="muted pequeno"> · ${yo().insignias.length} de ${C.insignias.length} insignias · racha de ${yo().racha.dias} días</span></span><span class="flecha">›</span></a>
-        <h2 class="titulo-seccion">De dónde vienen tus puntos</h2>
-        <div class="componentes">${Object.entries(C.componentes).map(([k, n]) => `<div class="componente"><strong style="color:${comp[k] < 0 ? 'var(--rojo)' : 'var(--morado)'}">${signo(comp[k]).replace('−0', '0').replace('+0', '0')}</strong><span>${n}</span></div>`).join('')}</div>
-        <h2 class="titulo-seccion">Mis puntos: historial</h2>
-        <div class="tarjeta">${e.historial.slice().reverse().map(h => {
-          const a = C.acciones[h.accion], v = valor(h);
-          return `<div class="mov"><div>${esc(a.motivo)}<small>${fecha(h.t)}${h.detalle ? ' · ' + esc(h.detalle) : ''}</small></div><span class="mov-puntos ${v > 0 ? 'mas' : 'menos'}">${signo(v)}</span></div>`;
+        </section>
+        ${seccion('De dónde vienen tus puntos')}
+        <div class="componentes">${Object.entries(C.componentes).map(([k, n]) => `<div class="tarjeta"><strong class="${comp[k] < 0 ? 'rojo' : ''}">${comp[k] ? signo(comp[k]) : '0'}</strong><span class="sub">${n}</span></div>`).join('')}</div>
+        ${seccion('Historial de puntos')}
+        <div class="tarjeta lista">${e.historial.slice().reverse().map(x => {
+          const a = C.acciones[x.accion], v = valor(x);
+          return `<div class="fila"><span class="fila-cuerpo"><strong class="normal">${esc(a.motivo)}</strong><span class="sub">${fecha(x.t)}${x.detalle ? ' · ' + esc(x.detalle) : ''}</span></span><span class="puntos-mov ${v > 0 ? 'verde' : 'rojo'}">${signo(v)}</span></div>`;
         }).join('')}
-        <div class="mov"><div>Inicio del mes<small>${fecha(inicioMes)}</small></div><span class="mov-puntos">${C.puntosInicioMes}</span></div></div>
+        <div class="fila"><span class="fila-cuerpo"><strong class="normal">Inicio del mes</strong><span class="sub">${fecha(inicioMes)}</span></span><span class="puntos-mov">${C.puntosInicioMes}</span></div></div>
         <button class="boton-texto" data-accion="salir">Cerrar sesión</button>`,
       despues: moverCarro
     };
@@ -649,34 +747,34 @@
     const podio = [t[1], t[0], t[2]];
     const mejor = t.slice().sort((a, b) => b.mejora - a.mejora)[0];
     const estadoPremio = i => {
-      if (i < 3) return pos === i + 1 ? '<span class="chip aldia">Hoy te corresponde</span>' : `<span class="chip gris">${esc(t[i].a.nombre)}</span>`;
-      if (i === 3) return mejor.a.id === s.usuario ? '<span class="chip aldia">Hoy te corresponde</span>' : `<span class="chip gris">${esc(mejor.a.nombre)}</span>`;
-      return '<span class="chip gris">Se define con los 12 meses</span>';
+      if (i < 3) return pos === i + 1 ? '<span class="chip aldia">Hoy te corresponde</span>' : `<span class="sub">${esc(t[i].a.nombre)}</span>`;
+      if (i === 3) return mejor.a.id === s.usuario ? '<span class="chip aldia">Hoy te corresponde</span>' : `<span class="sub">${esc(mejor.a.nombre)}</span>`;
+      return '<span class="sub">Fin de año</span>';
     };
+    const horas = D.asesores.map(a => ({ a, h: horasDe(a.id) })).sort((x, y) => y.h - x.h);
     return {
-      barra: { titulo: 'Ranking y premios', sub: `${nombreMes()} · se reinicia cada mes` },
+      barra: { titulo: 'Ranking', sub: `${MESES[mesActual]} · se reinicia cada mes` },
       pestana: 'ranking',
-      html: `<div class="tarjeta" style="margin-top:14px"><div class="podio">${podio.map((f, k) => {
+      html: `<div class="podio">${podio.map((f, k) => {
           const lugar = [2, 1, 3][k];
-          return `<div class="podio-col p${lugar} ${f.a.id === s.usuario ? 'yo' : ''}"><div class="avatar">${iniciales(f.a.nombre)}</div><div class="podio-nombre">${esc(f.a.nombre)}</div><div class="podio-puntos">${f.puntos} pts</div><div class="podio-base">${lugar}</div></div>`;
-        }).join('')}</div></div>
-        <div class="tarjeta"><strong>Tu posición: ${pos}.º con ${mio.puntos} puntos</strong><div class="muted pequeno">${pos > 3 ? `Te faltan ${t[2].puntos - mio.puntos + 1} puntos para el 3.er lugar.` : pos > 1 ? `Te faltan ${t[pos - 2].puntos - mio.puntos + 1} puntos para subir un puesto.` : 'Vas primero. Mantén el ritmo.'}</div></div>
-        <h2 class="titulo-seccion">Mayor mejora del mes</h2>
-        <div class="tarjeta mejora"><div class="avatar">${iniciales(mejor.a.nombre)}</div><div class="fila-cuerpo"><strong>${esc(mejor.a.nombre)}</strong><div class="muted pequeno">${signo(mejor.mejora)} puntos frente a su mes anterior</div></div><span class="chip morado">$50</span></div>
-        <p class="nota">Tu mejora: ${signo(mio.mejora)} puntos frente a tu mes anterior (${mio.a.mesAnterior}).</p>
-        <h2 class="titulo-seccion">Ranking completo</h2>
-        <div class="tarjeta">${t.map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><div class="posicion">${i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(f.a.nombre)}${f.a.id === s.usuario ? ' <span class="chip morado">Tú</span>' : ''}</div><div class="fila-sub">${esc(f.a.agencia)} · ${f.ventas} ventas</div></div><span class="puntos-fila">${f.puntos}</span></div>`).join('')}</div>
+          return `<div class="podio-col p${lugar} ${f.a.id === s.usuario ? 'yo' : ''}"><div class="avatar">${iniciales(f.a.nombre)}</div><div class="podio-nombre">${esc(f.a.nombre.split(' ')[0])}</div><div class="sub">${f.puntos} pts</div><div class="podio-base">${lugar}</div></div>`;
+        }).join('')}</div>
+        <div class="tarjeta destacado"><span class="etiqueta">Tu posición</span><p class="cifra-grande">${pos}.º <small>con ${mio.puntos} puntos</small></p><p class="sub">${pos > 3 ? `Te faltan ${t[2].puntos - mio.puntos + 1} puntos para el 3.er lugar.` : pos > 1 ? `Te faltan ${t[pos - 2].puntos - mio.puntos + 1} puntos para subir un puesto.` : 'Vas primero. Mantén el ritmo.'} Mejora frente a tu mes anterior: ${signo(mio.mejora)}.</p></div>
+        ${seccion('Todos')}
+        <div class="tarjeta lista">${t.map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><span class="posicion">${i + 1}</span><span class="fila-cuerpo"><strong>${esc(f.a.nombre)}${f.a.id === s.usuario ? ' <span class="chip morado">Tú</span>' : ''}</strong><span class="sub">${esc(f.a.agencia)} · ${f.ventas} ventas</span></span><span class="puntos-fila">${f.puntos}</span></div>`).join('')}</div>
         <p class="nota">El ranking suma resultados, gestión, servicio y desarrollo; no solo ventas.</p>
-        <h2 class="titulo-seccion">Horas de capacitación del año</h2>
-        <div class="tarjeta">${D.asesores.map(a => ({ a, h: horasDe(a.id) })).sort((x, y) => y.h - x.h).map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><div class="posicion">${i + 1}</div><div class="fila-cuerpo"><div class="fila-nombre">${esc(f.a.nombre)}</div><div class="barra-progreso" style="margin-top:5px"><span style="width:${Math.min(100, f.h / C.capacitacion.metaHorasAnio * 100)}%"></span></div></div><span class="puntos-fila">${String(f.h).replace('.', ',')}<small class="muted pequeno"> h</small></span></div>`).join('')}</div>
-        <p class="nota">Meta: ${C.capacitacion.metaHorasAnio} horas de capacitación comercial por asesor al año (Balanced Scorecard).</p>
-        <h2 class="titulo-seccion">Premios</h2>
-        <div class="tarjeta">${C.premios.map((p, i) => `<div class="premio"><div class="fila-cuerpo"><div class="premio-puesto">${esc(p.puesto)}</div><div>${esc(p.premio)}</div><div class="fila-sub">${esc(p.frecuencia)}</div></div>${estadoPremio(i)}</div>`).join('')}</div>
+        ${seccion('Mayor mejora del mes')}
+        <div class="tarjeta lista"><div class="fila"><span class="avatar chico">${iniciales(mejor.a.nombre)}</span><span class="fila-cuerpo"><strong>${esc(mejor.a.nombre)}</strong><span class="sub">${signo(mejor.mejora)} puntos frente a su mes anterior</span></span><span class="chip premio">$50</span></div></div>
+        ${seccion('Horas de capacitación del año')}
+        <div class="tarjeta lista">${horas.map((f, i) => `<div class="fila ${f.a.id === s.usuario ? 'yo' : ''}"><span class="posicion">${i + 1}</span><span class="fila-cuerpo"><strong>${esc(f.a.nombre)}</strong>${barra(f.h, META_ANIO)}</span><span class="puntos-fila">${f.h}<small> h</small></span></div>`).join('')}</div>
+        <p class="nota">Meta: ${HPM} h al mes, ${META_ANIO} h al año.</p>
+        ${seccion('Premios')}
+        <div class="tarjeta lista">${C.premios.map((p, i) => `<div class="fila"><span class="fila-cuerpo"><strong>${esc(p.puesto)}</strong><span class="sub texto">${esc(p.premio)}</span><span class="sub">${esc(p.frecuencia)}</span></span><span class="fila-lado">${estadoPremio(i)}</span></div>`).join('')}</div>
         <p class="nota">Montos provisionales: se definen después del análisis financiero.</p>`
     };
   }
 
-  function pNoExiste() { return { barra: { titulo: 'No encontrado', volver: '#inicio' }, html: '<div class="tarjeta" style="margin-top:14px">Esta pantalla no existe.</div>' }; }
+  function pNoExiste() { return { barra: { titulo: 'No encontrado', volver: '#inicio' }, html: '<div class="tarjeta"><p>Esta pantalla no existe.</p></div>' }; }
 
   // ---------- Dibujar ----------
   function render() {
@@ -686,15 +784,17 @@
     if (s.usuario && yo()) revisarInsignias();
     const p = ({
       login: pLogin, inicio: pInicio, leads: pLeads, lead: () => pLead(a), acciones: () => pAcciones(a),
-      objecion: () => pObjecion(a), guia: () => pGuia(a, b), cierre: () => pCierre(a), desarrollo: pDesarrollo,
-      curso: () => pCurso(a, b), progreso: pProgreso, ranking: pRanking, logros: pLogros
+      objecion: () => pObjecion(a), guia: () => pGuia(a, b), cierre: () => pCierre(a),
+      capacitaciones: pCapacitaciones, desarrollo: pCapacitaciones, capacitacion: () => pCapacitacion(a, b), 'registrar-horas': pRegistrarHoras,
+      progreso: pProgreso, ranking: pRanking, logros: pLogros
     }[r] || pNoExiste)();
-    const barra = $('#barra');
-    barra.hidden = !!p.sinBarra;
+    const cab = $('#barra');
+    cab.hidden = !!p.sinBarra;
     if (!p.sinBarra) {
       const bb = p.barra || {};
-      barra.className = 'barra' + (bb.alta ? ' alta' : '');
-      barra.innerHTML = `${bb.volver ? `<a class="barra-volver" href="${bb.volver}" aria-label="Volver">${ICONO.volver}</a>` : ''}<div class="barra-titulo"><strong>${esc(bb.titulo)}</strong>${bb.sub ? `<span>${bb.sub}</span>` : ''}</div><span class="etiqueta-prueba">Datos de prueba</span>`;
+      cab.innerHTML = bb.marca
+        ? `<div class="barra-titulo"><strong class="marca">1001Carros</strong></div><span class="demo">Datos de prueba</span>`
+        : `${bb.volver ? `<a class="barra-volver" href="${bb.volver}" aria-label="Volver">${ICONO.volver}</a>` : ''}<div class="barra-titulo"><strong>${esc(bb.titulo)}</strong>${bb.sub ? `<span>${esc(bb.sub)}</span>` : ''}</div><span class="demo">Demo</span>`;
     }
     $('#pantalla').innerHTML = p.html;
     $('#pantalla').style.padding = p.sinBarra ? '0' : '';
@@ -754,7 +854,7 @@
     switch (b.dataset.accion) {
       case 'atender':
         atenderLead(l); render(); break;
-      case 'seguimiento':
+      case 'seguimiento': {
         l.seguimientoHecho = true;
         l.proximaAccion = 'Programar el siguiente seguimiento';
         guardar();
@@ -763,6 +863,7 @@
         reto.avance++;
         if (!reto.cumplido && reto.avance >= C.reto.meta) { reto.cumplido = true; guardar(); sumar('retoSemanal', C.reto.texto); }
         guardar(); render(); break;
+      }
       case 'pregunta': {
         const e2 = yo(), q = preguntaHoy(), op = Number(b.dataset.op);
         e2.pregunta.fecha = hoyCorto(); e2.pregunta.elegida = op;
@@ -781,7 +882,7 @@
         l.vendido = true; l.proximaAccion = 'Seguimiento posventa';
         yo().kit.push({ lead: l.id, articulo: cierre.kit, t: Date.now() });
         guardar();
-        sumar(['ventaCerrada', cierre.carita], `${l.nombre} · obsequio: ${cierre.kit}`, 'Venta cerrada y satisfacción registrada');
+        sumar(['ventaCerrada', cierre.carita], `${l.nombre} · obsequio: ${cierre.kit}`, 'Venta y satisfacción registradas');
         cierre = { kit: null, carita: null };
         location.hash = '#inicio'; break;
       case 'salir':
@@ -803,7 +904,7 @@
 
   document.addEventListener('submit', e => {
     e.preventDefault();
-    const form = e.target;
+    const form = e.target, d = new FormData(form);
     if (form.id === 'form-login') {
       const texto = $('#usuario').value.trim().toLowerCase();
       const a = D.asesores.find(x => x.nombre.toLowerCase() === texto || x.nombre.toLowerCase().split(' ')[0] === texto || x.id === texto);
@@ -811,32 +912,35 @@
       entrar(a.id);
     } else if (form.id === 'form-ficha') {
       const l = lead(form.dataset.id);
-      new FormData(form).forEach((v, k) => { l.ficha[k] = v; });
+      d.forEach((v, k) => { l.ficha[k] = v; });
       guardar(); avisar('Información del cliente guardada');
     } else if (form.id === 'form-coaching') {
-      const d = new FormData(form);
-      const horas = Number(d.get('horas'));
       yo().coaching.push({ fecha: hoyCorto(), jefe: 'Jefe de agencia (prueba)', brecha: d.get('brecha'), accion: d.get('accion') });
-      sumar(horasItem(horas, 'Coaching con el jefe de agencia', 'Coaching'), '', `Coaching guardado: ${String(horas).replace('.', ',')} h de capacitación`);
-      render();
+      guardar(); avisar('Sesión de coaching guardada'); render();
+    } else if (form.id === 'form-horas') {
+      const horas = Number(d.get('horas')), antes = faltanHoras();
+      const [, mm, dd] = (d.get('fecha') || '').split('-');
+      yo().cap.sesiones.push({ fecha: dd ? `${dd}/${mm}` : hoyCorto(), actividad: d.get('actividad'), horas });
+      guardar();
+      const falta = faltanHoras();
+      avisar(antes > 0 && falta === 0 ? 'Meta de horas del mes cumplida. Ya puedes dar la evaluación final.' : falta > 0 ? `${h(horas)} registradas · te faltan ${h(falta)}` : `${h(horas)} registradas`, falta === 0 && antes > 0 ? 'logro' : '');
+      location.hash = '#capacitaciones';
     } else if (form.id === 'form-evaluacion') {
-      const c = curso(form.dataset.id), ec = estadoCurso(c.id), d = new FormData(form);
-      const respuestas = c.preguntas.map((_, i) => Number(d.get('p' + i)));
-      const nota = Math.round(respuestas.filter((r, i) => r === c.preguntas[i][2]).length / c.preguntas.length * 100);
+      const i = Number(form.dataset.i), dd = D.capacitaciones[i], c = yo().cap;
+      const respuestas = dd.preguntas.map((_, k) => Number(d.get('p' + k)));
+      const nota = Math.round(respuestas.filter((r, k) => r === dd.preguntas[k][2]).length / dd.preguntas.length * 100);
       if (form.dataset.tipo === 'inicial') {
-        ec.notaInicial = nota; ec.estado = 'en curso'; guardar();
-        avisar(`Evaluación inicial: ${nota} %`);
-        location.hash = `#curso/${c.id}`;
+        c.notaInicial = nota; guardar();
+        avisar(`Evaluación inicial: ${nota}`);
+        location.hash = `#capacitacion/${i}`;
         return;
       }
-      const accion = puntosCurso(nota);
-      ec.notaFinal = nota;
-      if (accion) ec.estado = 'completado';
-      guardar();
-      ultimoResultado = { id: c.id, nota, accion, respuestas };
-      if (accion) sumar([accion, horasItem(c.horas, 'Curso: ' + c.nombre, 'Curso')], c.nombre, `Curso aprobado y ${c.horas} h de capacitación`);
-      else avisar(`Nota ${nota} %: no se aprobó`, 'menos');
-      location.hash = `#curso/${c.id}/resultado`;
+      c.notaFinal = nota; guardar();
+      const accion = accionNota(nota);
+      ultimoResultado = { i, nota, accion, respuestas };
+      if (accion) sumar(accion, dd.nombre, `Capacitación completada con ${nota}`);
+      else avisar(`Capacitación completada con ${nota}. Los puntos empiezan en 91.`);
+      location.hash = `#capacitacion/${i}/resultado`;
     }
   });
 
